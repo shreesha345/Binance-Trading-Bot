@@ -1,6 +1,6 @@
 from binance.enums import *
 from binance.client import Client
-from utils.config import BINANCE_API_KEY, BINANCE_API_SECRET, TEST
+from config import BINANCE_API_KEY, BINANCE_API_SECRET, TEST
 from pprint import pprint
 from rich import print as rich_print
 from rich.pretty import Pretty
@@ -118,59 +118,95 @@ def cancel_order(client, symbol, order_id=None, orig_client_order_id=None):
     return client.futures_cancel_order(**params)
 
 
-def all_orders(symbol):
+def open_orders(symbol):
     """Fetch all open orders for a given symbol."""
     params = {'symbol': symbol}
     return client.futures_get_open_orders(symbol=symbol)
 
+def get_all_orders(symbol):
+    """Fetch all orders for a given symbol."""
+    params = {'symbol': symbol}
+    return client.futures_get_all_orders(**params)
+
+def get_current_position(symbol):
+    """Fetch the current position for a given symbol."""
+    positions = client.futures_position_information(symbol=symbol)
+    for position in positions:
+        if position['symbol'] == symbol:
+            return position
+    raise ValueError(f"No position found for symbol {symbol}")
+
+
+def get_status_order(symbol, orderId):
+    """Get the status, orderId, clientOrderId, and symbol of an order."""
+    status = client.futures_get_order(symbol=symbol, orderId=orderId)
+    filtered = {
+        'status': status.get('status'),
+        'orderId': status.get('orderId'),
+        'clientOrderId': status.get('clientOrderId'),
+        'symbol': status.get('symbol')
+    }
+    return filtered
+
+
+def get_recent_trades(symbol, limit=10):
+    """Fetch recent trades for a given symbol."""
+    trades = client.futures_recent_trades(symbol=symbol, limit=limit)
+    return trades
+
+# print(get_status_order("ETCUSDT", 210695890))  # Replace with actual orderId
+
+# print(get_current_position("ETCUSDT"))
+
+# print(get_all_orders("ETCUSDT"))
 
 # if __name__ == "__main__":
-    # # Example of creating a BTCUSDT perpetual futures market buy order
-    # symbol = "ETCUSDT"
-    # quantity = 1  # Buy 1 ETC (adjust according to your requirements)
+#     # # Example of creating a BTCUSDT perpetual futures market buy order
+#     symbol = "ETCUSDT"
+#     quantity = 1  # Buy 1 ETC (adjust according to your requirements)
 
-    # try:
-    #     # Get current market price (optional, for information only)
-    #     # btc_price = float(client.futures_symbol_ticker(symbol=symbol)['price'])
-    #     # print(f"Current {symbol} price: {btc_price}")
+#     try:
+#         # Get current market price (optional, for information only)
+#         btc_price = float(client.futures_symbol_ticker(symbol=symbol)['price'])
+#         print(f"Current {symbol} price: {btc_price}")
         
-    #     # orders = all_orders(symbol)
-    #     # print(f"Open orders for {orders}:")
-    #     # Uncomment below examples as needed
+#     #     # orders = all_orders(symbol)
+#     #     # print(f"Open orders for {orders}:")
+#     #     # Uncomment below examples as needed
         
-    #     # Example 1: Cancel order by client order ID
-    #     # cancel_order(client, symbol, orig_client_order_id="x-Cb7ytekJ8a57f9c2cf91489eb00efd")
+#     #     # Example 1: Cancel order by client order ID
+#     #     # cancel_order(client, symbol, orig_client_order_id="x-Cb7ytekJ8a57f9c2cf91489eb00efd")
         
-    #     # Example 2: Create a market buy order
-    #     # order = create_buy_order(
-    #     #     client=client,
-    #     #     symbol=symbol,
-    #     #     quantity=quantity
-    #     # )
-    #     # print_order_response(order, label="Buy Order")
+#         # Example 2: Create a market buy order
+#         order = create_buy_order(
+#             client=client,
+#             symbol=symbol,
+#             quantity=quantity
+#         )
+#         print_order_response(order, label="Buy Order")
         
-    #     # Example 3: Create a market sell order
-    #     # sell_order = create_sell_order(
-    #     #     client=client,
-    #     #     symbol=symbol,
-    #     #     quantity=quantity
-    #     # )
-    #     # print_order_response(sell_order, label="Sell Order")
+#     #     # Example 3: Create a market sell order
+#     #     # sell_order = create_sell_order(
+#     #     #     client=client,
+#     #     #     symbol=symbol,
+#     #     #     quantity=quantity
+#     #     # )
+#     #     # print_order_response(sell_order, label="Sell Order")
         
-    #     # Example 4: Create a limit sell order
-    #     # tick_size = get_tick_size(symbol)
-    #     # print(f"Tick size for {symbol}: {tick_size}")
-    #     # sell_price = round((btc_price * 2) / tick_size) * tick_size  # 2% higher, adjusted to tick size
-    #     # sell_price = 17.076
-    #     # sell_order = create_sell_order(
-    #     #     client=client,
-    #     #     symbol=symbol,
-    #     #     quantity=quantity,
-    #     #     price=sell_price,
-    #     #     order_type=FUTURE_ORDER_TYPE_LIMIT
-    #     # )
-    #     # print_order_response(sell_order, label="Sell Limit Order")
+#     #     # Example 4: Create a limit sell order
+#     #     # tick_size = get_tick_size(symbol)
+#     #     # print(f"Tick size for {symbol}: {tick_size}")
+#     #     # sell_price = round((btc_price * 2) / tick_size) * tick_size  # 2% higher, adjusted to tick size
+#     #     # sell_price = 17.076
+#     #     # sell_order = create_sell_order(
+#     #     #     client=client,
+#     #     #     symbol=symbol,
+#     #     #     quantity=quantity,
+#     #     #     price=sell_price,
+#     #     #     order_type=FUTURE_ORDER_TYPE_LIMIT
+#     #     # )
+#     #     # print_order_response(sell_order, label="Sell Limit Order")
         
-    # except Exception as e:
-    #     print("An error occurred:")
-    #     pprint(e)
+#     except Exception as e:
+#         print("An error occurred:")
+#         pprint(e)
