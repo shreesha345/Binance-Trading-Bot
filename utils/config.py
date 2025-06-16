@@ -1,51 +1,41 @@
-# ➤ Loads .env values, provides API keys and global config based on MODE
 import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-def get_mode():
-    """Get current trading mode (live/test)"""
-    return os.getenv('MODE', 'test')
+# Get MODE from environment (default to 'live' if not set)
+MODE = os.getenv('MODE', 'live').lower()
+print(f"MODE from .env: '{MODE}'")
 
-def is_testnet():
-    """Check if running in testnet mode"""
-    return get_mode() != 'live'
-
-def get_api_credentials():
-    """Get API credentials based on current mode"""
-    mode = get_mode()
-    
-    if mode == 'live':
-        return {
-            'api_key': os.getenv('BINANCE_API_KEY'),
-            'secret_key': os.getenv('BINANCE_SECRET_KEY'),
-            'testnet': False
-        }
+def get_binance_keys():
+    """
+    Returns the appropriate Binance API key and secret based on MODE.
+    If MODE is 'test' or 'true', use testnet keys.
+    If MODE is 'live' or 'false', use mainnet keys.
+    """
+    if MODE in ['test', 'true']:
+        api_key = os.getenv('BINANCE_TESTNET_API_KEY')
+        secret_key = os.getenv('BINANCE_TESTNET_SECRET_KEY')
     else:
-        return {
-            'api_key': os.getenv('BINANCE_TESTNET_API_KEY'),
-            'secret_key': os.getenv('BINANCE_TESTNET_SECRET_KEY'),
-            'testnet': True
-        }
+        api_key = os.getenv('BINANCE_API_KEY')
+        secret_key = os.getenv('BINANCE_SECRET_KEY')
+    return api_key, secret_key
 
-class Config:
-    """Configuration class that holds API credentials"""
-    def __init__(self):
-        creds = get_api_credentials()
-        self.api_key = creds['api_key']
-        self.secret_key = creds['secret_key']
-        self.testnet = creds['testnet']
 
-def get_config():
-    """Load and return configuration instance"""
-    return Config()
+def print_mode_status():
+    """
+    Prints 'true' if MODE is 'test' or 'true', otherwise prints 'false'.
+    """
+    if MODE in ['test', 'true']:
+        print('true')
+        return True
+    else:
+        print('false')
+        return False
 
-# Create a default config instance for direct variable access
-_default_config = Config()
+# Example usage:
+# api_key, secret_key = get_binance_keys()
+MODE = print_mode_status()
 
-# Export variables for backward compatibility
-BINANCE_API_KEY = _default_config.api_key
-BINANCE_API_SECRET = _default_config.secret_key
-TEST = _default_config.testnet
+BINANCE_API_KEY, BINANCE_API_SECRET = get_binance_keys()
