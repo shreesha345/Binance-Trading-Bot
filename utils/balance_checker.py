@@ -1,7 +1,7 @@
 from binance.client import Client
 from dotenv import load_dotenv
 import os
-from config import BINANCE_API_KEY, BINANCE_API_SECRET, TEST
+from utils.config import BINANCE_API_KEY, BINANCE_API_SECRET, TEST
 
 # Load environment variables from .env file
 load_dotenv()
