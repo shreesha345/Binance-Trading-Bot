@@ -13,4 +13,7 @@ dependencies = [
     "requests>=2.31.0",
     "pydantic>=2.0.0",
     "rich>=14.0.0",
+    "pytz>=2025.2",
+    "numpy>=2.3.0",
+    "pandas>=2.3.0",
 ]
