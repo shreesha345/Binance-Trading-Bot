@@ -8,7 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from websocket_client.ohlc_collector import ohlc_strategy_collector
 
 def main():
-    symbol = "btcusdt"
+    symbol = "ETHUSDT"
     interval = "1m"
     testnet = MODE
     print(f"🚀 Starting {interval} interval data collection for {symbol.upper()}")
