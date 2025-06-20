@@ -43,8 +43,8 @@ async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = Fa
                 'ha_close': formatted_candle['ha_close']
             }
             clear_screen()
-            recent_data = display_data[-5:]
-            print_ohlcv_table_with_signals(recent_data, show_heikin_ashi)
+            # Show all collected data, not just the last 5
+            print_ohlcv_table_with_signals(display_data, show_heikin_ashi)
         await ohlc_listener_futures_ws(symbol, interval, on_kline, testnet=testnet)
     except KeyboardInterrupt:
         print("\n🔄 Shutting down gracefully...")
