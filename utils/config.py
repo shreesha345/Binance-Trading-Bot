@@ -50,3 +50,16 @@ BINANCE_API_KEY, BINANCE_API_SECRET = get_binance_keys()
 QUANTITY = float(os.getenv('QUANTITY', '0.01'))  # Default quantity for trades
 BUY_OFFSET = float(os.getenv('BUY_OFFSET', '0.0'))  # Offset for buy price
 SELL_OFFSET = float(os.getenv('SELL_OFFSET', '0.0'))  # Offset for sell price
+
+# Trading symbol - this is the source of truth for the symbol to trade
+TRADING_SYMBOL = "ETHUSDT"
+
+# Time settings
+CANDLE_INTERVAL = '1m'  # Candle interval ('1m', '5m', '15m', '1h', etc.)
+
+# Order settings
+MAX_ORDERS = 1  # Maximum number of open orders per symbol
+
+# Debug settings
+DEBUG_MODE = True  # Set to True to enable debug output and disable screen clearing
+SHOW_ERRORS = True  # Set to True to show error messages
