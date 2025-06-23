@@ -45,3 +45,8 @@ BINANCE_API_KEY, BINANCE_API_SECRET = get_binance_keys()
 
 # print(f"Binance API Key: {BINANCE_API_KEY}")
 # print(f"Binance API Secret: {BINANCE_API_SECRET}")
+
+# Trading parameters
+QUANTITY = float(os.getenv('QUANTITY', '0.01'))  # Default quantity for trades
+BUY_OFFSET = float(os.getenv('BUY_OFFSET', '0.0'))  # Offset for buy price
+SELL_OFFSET = float(os.getenv('SELL_OFFSET', '0.0'))  # Offset for sell price
