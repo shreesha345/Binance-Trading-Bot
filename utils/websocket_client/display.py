@@ -31,17 +31,16 @@ def print_ohlcv_table_with_signals(data, show_heikin_ashi=True):
     
     for row in data:
         signal = row.get('signal', 'HOLD')
-        entry = row.get('entry', '-')
-        stop_loss = row.get('stop_loss', '-')
-        position = row.get('position', '-')
-          
-        # Format strings with proper spacing
-        entry_str = f"{entry:.2f}" if isinstance(entry, (int, float)) else "-"
-        sl_str = f"{stop_loss:.2f}" if isinstance(stop_loss, (int, float)) else "-"
+        entry = row.get('entry')
+        stop_loss = row.get('stop_loss')
+        position = row.get('position', '-')        # Format strings with proper spacing
+        entry_str = f"{entry:.2f}" if isinstance(entry, (int, float)) and entry is not None else "-"
+        sl_str = f"{stop_loss:.2f}" if isinstance(stop_loss, (int, float)) and stop_loss is not None else "-"
         
         # Format position display (LONG or NONE) with color
         position_str = position if position else 'NONE'
-          # Create colored versions of signal and position
+        
+        # Create colored versions of signal and position
         colored_signal = signal
         colored_position = position_str
         
