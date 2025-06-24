@@ -3,7 +3,7 @@ Bot state management module to track positions and orders across the application
 """
 
 # Global state variables
-position = 'NONE'  # Current position: 'NONE', 'LONG', 'SHORT'
+position = 'NONE'  # Current position: 'NONE', 'LONG', 'SHORT', 'CLOSED_LONG', 'CLOSED_SHORT'
 active_buy_order = None  # Details of the current buy order
 active_sell_order = None  # Details of the current sell order
 buy_filled_price = None  # Price at which the buy order was filled
