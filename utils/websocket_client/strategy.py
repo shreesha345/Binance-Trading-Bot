@@ -64,19 +64,15 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
     current_candle_high = row_data["high"]
     current_candle_low = row_data["low"]
     current_close = float(kline["c"])
-    
-    # Calculate buy parameters - use HA_High + BUY_OFFSET - truncate to 2 decimal places
+      # Calculate buy parameters - use HA_High + BUY_OFFSET - truncate to 2 decimal places
     buy_price = int((row_data["ha_high"] + BUY_OFFSET) * 100) / 100
     
     # Use previous candle high for stop limit to avoid immediate trigger
     prev_candle_high = previous_ha_candle.get("high", current_candle_high) if previous_ha_candle else current_candle_high
     buy_stop_limit = int(prev_candle_high * 100) / 100
-      # Calculate sell parameters
-    # The stop_limit (trigger price) should be at HA_Low minus offset
+    
+    # Calculate sell parameters - set both price and stop_limit to HA_Low minus offset
     sell_stop_limit = int((row_data["ha_low"] - SELL_OFFSET) * 100) / 100
-    # The actual order price should be slightly higher than the trigger price
-    # (adding 1 to ensure there's a small difference, will be adjusted to tick size in sell_long)
-    sell_price = int((sell_stop_limit + 1) * 100) / 100
     
     # Set display values
     if get_position() == "LONG":
@@ -107,14 +103,11 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
                 row_data["signal"] = "BUY"
                 row_data["position"] = "LONG"
                 row_data["entry"] = filled_price                  # Create immediate stop loss
-                current_price = float(kline["c"])
-                # Use current candle HA_Low for the stop loss trigger price
+                current_price = float(kline["c"])                # Use current candle HA_Low for the stop loss trigger price
                 stop_trigger_price = int((row_data["ha_low"] - SELL_OFFSET) * 100) / 100
-                # Order price should be slightly higher
-                stop_order_price = int((stop_trigger_price + 1) * 100) / 100
                 
-                rich_print(f"[STRATEGY] Creating initial stop loss after fill with trigger at: {stop_trigger_price}, order price: {stop_order_price}")
-                sell_order = sell_long(symbol, price=stop_order_price, stop_limit=stop_trigger_price, quantity=QUANTITY)
+                rich_print(f"[STRATEGY] Creating initial stop loss after fill with trigger at: {stop_trigger_price}")
+                sell_order = sell_long(symbol, price=stop_trigger_price, stop_limit=stop_trigger_price, quantity=QUANTITY)
                 if sell_order:
                     set_active_sell_order(sell_order)
                     # Update the stop_loss in row_data with the actual trigger price (stopPrice)
@@ -142,18 +135,18 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
                 set_buy_filled_price(filled_price)
                 row_data["signal"] = "BUY"
                 row_data["position"] = "LONG"
-                row_data["entry"] = filled_price
-                  # Create immediate stop loss after buy is filled
+                row_data["entry"] = filled_price                # Create immediate stop loss after buy is filled
                 # Use current candle HA_Low for the stop loss calculation
                 stop_loss_price = int((row_data["ha_low"] - SELL_OFFSET) * 100) / 100
                 rich_print(f"[STRATEGY] Creating initial stop loss after fill at: {stop_loss_price}")
+                # Using the same price and stop_limit to ensure they're identical
                 sell_order = sell_long(symbol, price=stop_loss_price, stop_limit=stop_loss_price, quantity=QUANTITY)
                 if sell_order:
                     set_active_sell_order(sell_order)
-                    # Update the stop_loss in row_data with the actual price from the order
-                    actual_stop_price = float(sell_order.get('price', stop_loss_price))
+                    # Update the stop_loss in row_data with the trigger price from the order
+                    actual_stop_price = float(sell_order.get('stopPrice', stop_loss_price))
                     row_data["stop_loss"] = actual_stop_price
-                    rich_print(f"[STRATEGY] Stop Loss order placed at actual price: {actual_stop_price}")
+                    rich_print(f"[STRATEGY] Stop Loss order placed at trigger price: {actual_stop_price}")
                     rich_print(Pretty(sell_order))
             else:                # Cancel existing order to place a new one with updated prices
                 rich_print(f"[STRATEGY] Cancelling existing buy order to update with new prices: {order_id}")
@@ -189,15 +182,16 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
             else:
                 # Cancel existing stop loss to update with new prices
                 cancel_order(symbol, order_id)
-                set_active_sell_order(None)        # Create or update stop loss for the next candle
-        if get_position() == "LONG" and not get_active_sell_order():
-            rich_print(f"[STRATEGY] Creating/updating stop loss for next candle: {symbol} at price: {sell_price}, stop_limit: {sell_stop_limit}")
-            # Note: sell_price should already be higher than sell_stop_limit from earlier calculation
-            sell_order = sell_long(symbol, price=sell_price, stop_limit=sell_stop_limit, quantity=QUANTITY)
+                set_active_sell_order(None)        # Create or update stop loss for the next candle        if get_position() == "LONG" and not get_active_sell_order():
+            # Use same value for both price and stop_limit (ha_low - SELL_OFFSET)
+            sell_stop_limit = int((row_data["ha_low"] - SELL_OFFSET) * 100) / 100
+            rich_print(f"[STRATEGY] Creating/updating stop loss for next candle: {symbol} at price: {sell_stop_limit}, stop_limit: {sell_stop_limit}")
+            # Use the same value for both price and stop_limit
+            sell_order = sell_long(symbol, price=sell_stop_limit, stop_limit=sell_stop_limit, quantity=QUANTITY)
             if sell_order:
                 set_active_sell_order(sell_order)
                 # Update the stop_loss in row_data with the actual trigger price (stopPrice)
-                actual_trigger_price = float(sell_order.get('stopPrice', sell_price))
+                actual_trigger_price = float(sell_order.get('stopPrice', sell_stop_limit))
                 row_data["stop_loss"] = actual_trigger_price
                 rich_print(f"[STRATEGY] Stop Loss order placed with trigger price: {actual_trigger_price}, order price: {sell_order.get('price')}")
                 rich_print(Pretty(sell_order))
