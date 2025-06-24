@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.historical_handler import get_heikin_ashi_by_datetime
 
 def align_time_to_interval(dt, interval):
-    # ...existing code for align_time_to_interval...
+    # Align time to the start of the interval period
     if interval == '1s':
         return dt.replace(microsecond=0)
     elif interval == '1m':
@@ -58,8 +58,12 @@ async def get_historical_ha_data(symbol: str, interval: str, count: int = 5):
     try:
         historical_ha_data = []
         current_time = datetime.now()
+        
+        # Align current time to the current interval boundary
         aligned_time = align_time_to_interval(current_time, interval)
+        
         for i in range(count, 0, -1):
+            # Calculate the target time by subtracting the interval
             if interval == '1s':
                 target_time = aligned_time - timedelta(seconds=i)
             elif interval == '1m':
@@ -92,7 +96,10 @@ async def get_historical_ha_data(symbol: str, interval: str, count: int = 5):
                 target_time = aligned_time.replace(month=aligned_time.month - i if aligned_time.month > i else 12 - (i - aligned_time.month), 
                                                  year=aligned_time.year if aligned_time.month > i else aligned_time.year - 1)
             else:
-                return [], None
+                return [], None                
+            # Ensure target time is aligned to the interval boundary
+            target_time = align_time_to_interval(target_time, interval)
+            
             target_datetime_str = target_time.strftime('%d-%m-%Y %H:%M')
             try:
                 ha_data = get_heikin_ashi_by_datetime(symbol, interval, target_datetime_str)
