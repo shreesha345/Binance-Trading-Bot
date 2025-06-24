@@ -179,10 +179,12 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
                 row_data["position"] = "CLOSED_LONG"  # Change from NONE to CLOSED_LONG
                 row_data["entry"] = None  # Clear entry as the position is closed
                 # Keep the stop_loss value to show the price at which the position was closed
-            else:
-                # Cancel existing stop loss to update with new prices
+            else:                # Cancel existing stop loss to update with new prices
                 cancel_order(symbol, order_id)
-                set_active_sell_order(None)        # Create or update stop loss for the next candle        if get_position() == "LONG" and not get_active_sell_order():
+                set_active_sell_order(None)
+        
+        # Create or update stop loss for the next candle
+        if get_position() == "LONG" and not get_active_sell_order():
             # Use same value for both price and stop_limit (ha_low - SELL_OFFSET)
             sell_stop_limit = int((row_data["ha_low"] - SELL_OFFSET) * 100) / 100
             rich_print(f"[STRATEGY] Creating/updating stop loss for next candle: {symbol} at price: {sell_stop_limit}, stop_limit: {sell_stop_limit}")
