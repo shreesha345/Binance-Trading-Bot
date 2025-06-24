@@ -1,9 +1,9 @@
+from datetime import datetime, timedelta, timezone
+import time
 import os
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
-from datetime import datetime, timedelta, timezone
-from config import MODE, BINANCE_API_KEY, BINANCE_API_SECRET  # Fixed import path
-import time
+from utils.config import MODE, BINANCE_API_KEY, BINANCE_API_SECRET
 
 def setup_binance_client():
     """
@@ -116,6 +116,26 @@ def get_heikin_ashi_by_datetime(symbol, interval, target_datetime_str):
     """
     # Parse the target datetime string as local time and convert to UTC (timezone-aware)
     target_dt_local = datetime.strptime(target_datetime_str, '%d-%m-%Y %H:%M')
+    
+    # Align to exact interval boundary by truncating any seconds/microseconds
+    if interval == '1m':
+        target_dt_local = target_dt_local.replace(second=0, microsecond=0)
+    elif interval == '3m':
+        minutes = (target_dt_local.minute // 3) * 3
+        target_dt_local = target_dt_local.replace(minute=minutes, second=0, microsecond=0)
+    elif interval == '5m':
+        minutes = (target_dt_local.minute // 5) * 5
+        target_dt_local = target_dt_local.replace(minute=minutes, second=0, microsecond=0)
+    elif interval == '15m':
+        minutes = (target_dt_local.minute // 15) * 15
+        target_dt_local = target_dt_local.replace(minute=minutes, second=0, microsecond=0)
+    elif interval == '30m':
+        minutes = (target_dt_local.minute // 30) * 30
+        target_dt_local = target_dt_local.replace(minute=minutes, second=0, microsecond=0)
+    elif interval == '1h':
+        target_dt_local = target_dt_local.replace(minute=0, second=0, microsecond=0)
+    # Add more intervals as needed
+    
     try:
         from tzlocal import get_localzone
         local_tz = get_localzone()
@@ -191,63 +211,77 @@ def get_heikin_ashi_by_datetime(symbol, interval, target_datetime_str):
     if not klines:
         print("No data received.")
         return None
-
+    
     # Find the exact candle for the target datetime with interval-specific matching
     target_candle_index = -1
     for i, kline in enumerate(klines):
         kline_open_time_utc = datetime.fromtimestamp(kline[0] / 1000, tz=timezone.utc)
         
-        # For different intervals, we need to match differently
-        if interval in ['1s', '1m']:
-            # Match by exact time
-            target_resolution = timedelta(seconds=1) if interval == '1s' else timedelta(minutes=1)
-            if abs(kline_open_time_utc - target_dt_utc) < target_resolution:
+        # For all intervals, we want exact matching on interval boundaries
+        # Example: for 1m, we want an exact match on minutes with seconds=0
+        if interval == '1s':
+            if kline_open_time_utc.replace(microsecond=0) == target_dt_utc.replace(microsecond=0):
+                target_candle_index = i
+                break
+        elif interval == '1m':
+            if kline_open_time_utc.replace(second=0, microsecond=0) == target_dt_utc.replace(second=0, microsecond=0):
                 target_candle_index = i
                 break
         elif interval in ['3m', '5m', '15m', '30m']:
-            # Match by minute boundaries
+            # Extract interval value (e.g., 3 from '3m')
             interval_minutes = int(interval[:-1])
-            target_minute = target_dt_utc.minute
-            kline_minute = kline_open_time_utc.minute
-            if (kline_open_time_utc.replace(minute=0, second=0, microsecond=0) == 
-                target_dt_utc.replace(minute=0, second=0, microsecond=0) and
-                kline_minute == target_minute):
+            # Check if both timestamps align to the same interval boundary
+            if (kline_open_time_utc.replace(second=0, microsecond=0).minute % interval_minutes == 0 and
+                target_dt_utc.replace(second=0, microsecond=0).minute % interval_minutes == 0 and
+                kline_open_time_utc.replace(second=0, microsecond=0) == target_dt_utc.replace(second=0, microsecond=0)):
                 target_candle_index = i
                 break
         elif interval in ['1h', '2h', '6h', '8h', '12h']:
-            # Match by hour boundaries
+            # For hourly intervals, ensure both timestamps align to the exact hour boundary
             if interval == '1h':
-                if kline_open_time_utc.replace(minute=0, second=0, microsecond=0) == target_dt_utc.replace(minute=0, second=0, microsecond=0):
+                if (kline_open_time_utc.replace(minute=0, second=0, microsecond=0) == 
+                    target_dt_utc.replace(minute=0, second=0, microsecond=0)):
                     target_candle_index = i
                     break
             else:
+                # For multi-hour intervals, check if both timestamps align to the same interval boundary
                 interval_hours = int(interval[:-1])
-                if (kline_open_time_utc.replace(minute=0, second=0, microsecond=0).hour % interval_hours == 
-                    target_dt_utc.replace(minute=0, second=0, microsecond=0).hour % interval_hours and
-                    kline_open_time_utc.date() == target_dt_utc.date()):
+                if (kline_open_time_utc.hour % interval_hours == 0 and
+                    target_dt_utc.hour % interval_hours == 0 and
+                    kline_open_time_utc.replace(minute=0, second=0, microsecond=0) == 
+                    target_dt_utc.replace(minute=0, second=0, microsecond=0)):
                     target_candle_index = i
                     break
         elif interval in ['1d', '3d']:
-            # Match by day boundaries
+            # For daily intervals, match on day boundaries
             if interval == '1d':
-                if kline_open_time_utc.date() == target_dt_utc.date():
+                if (kline_open_time_utc.replace(hour=0, minute=0, second=0, microsecond=0) == 
+                    target_dt_utc.replace(hour=0, minute=0, second=0, microsecond=0)):
                     target_candle_index = i
                     break
-            else:  # 3d
-                days_diff = (target_dt_utc.date() - kline_open_time_utc.date()).days
-                if days_diff % 3 == 0:
+            else:  # '3d'
+                # For 3-day intervals, calculate days from epoch and check if both align to the same 3-day boundary
+                days_since_epoch_kline = (kline_open_time_utc - datetime(1970, 1, 1, tzinfo=timezone.utc)).days
+                days_since_epoch_target = (target_dt_utc - datetime(1970, 1, 1, tzinfo=timezone.utc)).days
+                if (days_since_epoch_kline % 3 == 0 and
+                    days_since_epoch_target % 3 == 0 and
+                    days_since_epoch_kline == days_since_epoch_target):
                     target_candle_index = i
                     break
         elif interval in ['1w', '1M']:
-            # Match by week/month boundaries
+            # For weekly intervals, ensure both timestamps align to the same week
             if interval == '1w':
-                if (kline_open_time_utc.isocalendar()[1] == target_dt_utc.isocalendar()[1] and
-                    kline_open_time_utc.year == target_dt_utc.year):
+                # Use isocalendar to get year and week number
+                kline_year, kline_week, _ = kline_open_time_utc.isocalendar()
+                target_year, target_week, _ = target_dt_utc.isocalendar()
+                
+                if kline_year == target_year and kline_week == target_week:
                     target_candle_index = i
                     break
-            else:  # 1M
-                if (kline_open_time_utc.month == target_dt_utc.month and
-                    kline_open_time_utc.year == target_dt_utc.year):
+            else:  # '1M'
+                # For monthly intervals, ensure both timestamps are in the same month and year
+                if (kline_open_time_utc.year == target_dt_utc.year and 
+                    kline_open_time_utc.month == target_dt_utc.month):
                     target_candle_index = i
                     break
     
@@ -269,50 +303,37 @@ def print_heikin_ashi_candle(candle):
         print("No candle data available.")
         return
     
-    # Extract date and time separately
-    datetime_obj = datetime.strptime(candle['open_time'], '%Y-%m-%d %H:%M:%S')
-    date_str = datetime_obj.strftime('%d-%m-%Y')  # Format: dd-mm-YYYY
-    time_str = datetime_obj.strftime('%H:%M')     # Format: HH:MM
+    print(f"\n📊 Heikin Ashi Candle for {candle['open_time']} UTC")
+    print(f"Symbol: {candle.get('symbol', 'Unknown')}")
+    print(f"Volume: {candle['volume']}")
+    print(f"Number of Trades: {candle['number_of_trades']}")
     
-    print(f"Date: {date_str}")
-    print(f"Time: {time_str}")
-    print("Heikin Ashi Candle:")
-    print(f"  Open:  {format_to_two_decimals(candle['ha_open'])}")
-    print(f"  High:  {format_to_two_decimals(candle['ha_high'])}")
-    print(f"  Low:   {format_to_two_decimals(candle['ha_low'])}")
-    print(f"  Close: {format_to_two_decimals(candle['ha_close'])}")
+    print("\nRegular Candle Values:")
+    print(f"Open: {candle['regular_open']}")
+    print(f"High: {candle['regular_high']}")
+    print(f"Low: {candle['regular_low']}")
+    print(f"Close: {candle['regular_close']}")
+    
+    print("\nHeikin Ashi Values:")
+    print(f"HA Open: {candle['ha_open']}")
+    print(f"HA High: {candle['ha_high']}")
+    print(f"HA Low: {candle['ha_low']}")
+    print(f"HA Close: {candle['ha_close']}")
 
-def main():
-    """
-    Example usage: Get Heikin Ashi data for a specific datetime
-    """
-    # Configuration
-    symbol = 'BTCUSDT'      # Trading pair
-    interval = '1m'         # 1 minute candles
-    
-    # Your specific datetime example
-    target_datetime = '19-06-2025 20:18'  # Format: dd-mm-YYYY HH:MM
-    
-    print(f"Fetching Heikin Ashi data for {symbol} at {target_datetime}...")
-    
-    # Get the Heikin Ashi candle for the specific datetime
-    ha_candle = get_heikin_ashi_by_datetime(symbol, interval, target_datetime)
-    
-    # Print the result
-    print_heikin_ashi_candle(ha_candle)
-    
-    # You can also access individual values like this:
-    if ha_candle:
-        print(f"\nQuick access:")
-        print(f"HA Open: {format_to_two_decimals(ha_candle['ha_open'])}")
-        print(f"HA High: {format_to_two_decimals(ha_candle['ha_high'])}")
-        print(f"HA Low: {format_to_two_decimals(ha_candle['ha_low'])}")
-        print(f"HA Close: {format_to_two_decimals(ha_candle['ha_close'])}")
-
+# Test the function if run directly
 if __name__ == "__main__":
-    # main()
+    import sys
     
-    # You can also call it directly like this:
-    ha_data = get_heikin_ashi_by_datetime('BTCUSDT', '1m', '19-06-2025 20:31')
-    # print_heikin_ashi_candle(ha_data)
-    print(ha_data)
+    if len(sys.argv) < 4:
+        print("Usage: python historical_handler.py <symbol> <interval> <target_datetime>")
+        print("Example: python historical_handler.py BTCUSDT 1m '15-06-2023 12:30'")
+        sys.exit(1)
+    
+    symbol = sys.argv[1]
+    interval = sys.argv[2]
+    target_datetime = sys.argv[3]
+    
+    print(f"Fetching Heikin Ashi candle for {symbol} at {target_datetime} with {interval} interval...")
+    
+    candle = get_heikin_ashi_by_datetime(symbol, interval, target_datetime)
+    print_heikin_ashi_candle(candle)
