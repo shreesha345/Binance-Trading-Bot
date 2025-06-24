@@ -50,14 +50,13 @@ async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = Fa
             # Skip if candle is not closed yet
             if not kline.get('x'):
                 return
-                
-            # Process timestamp and align to interval
+                  # Process timestamp and align to interval
             candle_time = int(kline['t'])
             candle_datetime = datetime.fromtimestamp(candle_time / 1000)
             aligned_candle_time = align_time_to_interval(candle_datetime, interval)
             
-            # Skip if candle time doesn't align with interval
-            if candle_datetime.replace(second=0, microsecond=0) != aligned_candle_time:
+            # Skip if candle time doesn't align exactly with the interval start time
+            if candle_datetime != aligned_candle_time:
                 return
                 
             # Skip duplicate candles
