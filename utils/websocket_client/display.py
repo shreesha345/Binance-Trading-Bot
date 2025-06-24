@@ -39,8 +39,7 @@ def print_ohlcv_table_with_signals(data, show_heikin_ashi=True):
         
         # Format position display (LONG or NONE) with color
         position_str = position if position else 'NONE'
-        
-        # Create colored versions of signal and position
+          # Create colored versions of signal and position
         colored_signal = signal
         colored_position = position_str
         
@@ -48,8 +47,8 @@ def print_ohlcv_table_with_signals(data, show_heikin_ashi=True):
             colored_signal = f"{GREEN}{signal}{RESET}"
         elif signal == 'SELL':
             colored_signal = f"{RED}{signal}{RESET}"
-            # When selling, show the LONG position in red too (indicating it's being exited)
-            if position_str == 'LONG':
+            # When selling, show the position in red to indicate it's being exited
+            if position_str == 'LONG' or position_str == 'CLOSED_LONG':
                 colored_position = f"{RED}{position_str}{RESET}"
         elif signal == 'HOLD':
             colored_signal = f"{GREY}{signal}{RESET}"
@@ -60,6 +59,8 @@ def print_ohlcv_table_with_signals(data, show_heikin_ashi=True):
                 colored_position = f"{GREEN}{position_str}{RESET}"
             elif position_str == 'NONE':
                 colored_position = f"{GREY}{position_str}{RESET}"
+            elif position_str == 'CLOSED_LONG':
+                colored_position = f"{RED}{position_str}{RESET}"
         
         # Build the line
         line = f"{row['time']:<{col_widths['time']}} {row['symbol']:<{col_widths['symbol']}}"
