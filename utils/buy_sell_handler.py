@@ -1,6 +1,6 @@
 from binance.enums import *
 from binance.client import Client
-from config import BINANCE_API_KEY, BINANCE_API_SECRET, MODE
+from utils.config import BINANCE_API_KEY, BINANCE_API_SECRET, MODE
 from pprint import pprint
 from rich import print as rich_print
 from rich.pretty import Pretty
@@ -195,14 +195,15 @@ def sell_long(symbol, price, stop_limit, quantity):
     
     Args:
         symbol (str): Trading pair symbol (e.g., 'BTCUSDT')
-        price (float): Order price
+        price (float): Order price - should be slightly above stop_limit
         stop_limit (float): Stop price to trigger the order
         quantity (float): Order quantity
         
     Returns:
         Order details dictionary or None if error
     """
-    try:        # Truncate price and stop_limit to 2 decimal places exactly (no rounding)
+    try:
+        # Truncate price and stop_limit to 2 decimal places exactly (no rounding)
         price = int(price * 100) / 100
         stop_limit = int(stop_limit * 100) / 100
         
@@ -210,6 +211,11 @@ def sell_long(symbol, price, stop_limit, quantity):
         tick_size = get_tick_size(symbol)
         price = round_to_tick(price, tick_size)
         stop_limit = round_to_tick(stop_limit, tick_size)
+        
+        # Make sure price is slightly higher than stop_limit (for proper triggering)
+        # If they're the same, add one tick size to price
+        if price <= stop_limit:
+            price = round_to_tick(stop_limit + tick_size, tick_size)
         
         rich_print(f"[SELL_LONG] Truncated price: {price}, stop_limit: {stop_limit}")
         return long_sell_order(symbol, price=price, stopLimit=stop_limit, quantity=quantity)
