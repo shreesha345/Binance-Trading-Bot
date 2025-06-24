@@ -195,7 +195,7 @@ def sell_long(symbol, price, stop_limit, quantity):
     
     Args:
         symbol (str): Trading pair symbol (e.g., 'BTCUSDT')
-        price (float): Order price - should be slightly above stop_limit
+        price (float): Order price - should be the same as stop_limit for consistency
         stop_limit (float): Stop price to trigger the order
         quantity (float): Order quantity
         
@@ -212,10 +212,9 @@ def sell_long(symbol, price, stop_limit, quantity):
         price = round_to_tick(price, tick_size)
         stop_limit = round_to_tick(stop_limit, tick_size)
         
-        # Make sure price is slightly higher than stop_limit (for proper triggering)
-        # If they're the same, add one tick size to price
-        if price <= stop_limit:
-            price = round_to_tick(stop_limit + tick_size, tick_size)
+        # Make price and stop_limit the same for consistent execution
+        # Use stop_limit as the source of truth
+        price = stop_limit
         
         rich_print(f"[SELL_LONG] Truncated price: {price}, stop_limit: {stop_limit}")
         return long_sell_order(symbol, price=price, stopLimit=stop_limit, quantity=quantity)
