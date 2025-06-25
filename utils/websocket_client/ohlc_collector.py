@@ -86,7 +86,8 @@ async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = Fa
                 clear_screen()
             print_ohlcv_table_with_signals(display_data, show_heikin_ashi)
             
-        # Start websocket listener
+        # Start websocket listener with retry mechanism
+        print(f"🔌 Starting WebSocket connection for {symbol}...")
         await ohlc_listener_futures_ws(symbol, interval, on_kline, testnet=testnet)
         
     except KeyboardInterrupt:
@@ -98,5 +99,6 @@ async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = Fa
             import traceback
             print("\nDetailed error information:")
             traceback.print_exc()
+        print("\n🔄 The connection will be retried automatically...")
         raise
         raise
