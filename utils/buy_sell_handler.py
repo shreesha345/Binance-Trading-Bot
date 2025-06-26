@@ -5,6 +5,7 @@ from pprint import pprint
 from rich import print as rich_print
 from rich.pretty import Pretty
 import math
+from utils.order_storage import save_filled_order, enrich_order_details
 
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET, testnet=MODE)
@@ -12,16 +13,15 @@ client = Client(BINANCE_API_KEY, BINANCE_API_SECRET, testnet=MODE)
 
 def round_to_tick(price, tick_size):
     """
-    Truncate price to max 2 decimal places, then adjust to the nearest valid tick size
+    Round price to the closest valid tick size for the exchange
+    Floor the result to be conservative with stop loss prices
     """
-    # First truncate to at most 2 decimal places (no rounding)
-    price = int(price * 100) / 100
-    
-    # Then truncate to the nearest tick size for the exchange
+    # Floor to the nearest tick size (this is what Binance appears to do)
+    # This will ensure prices match exactly with what the exchange expects
     rounded = math.floor(price / tick_size) * tick_size
     
-    # After adjusting to tick size, ensure we still have max 2 decimal places (truncated)
-    return int(rounded * 100) / 100
+    # Format to max 2 decimal places to avoid floating point issues
+    return round(rounded, 2)
 
 def enable_hedge_mode():
     try:
@@ -34,9 +34,9 @@ def enable_hedge_mode():
 
 def long_buy_order(symbol:str, price:float, stopLimit:float, quantity:float):
     try:
-        # Ensure price and stopLimit are truncated to 2 decimal places (no rounding)
-        price = int(price * 100) / 100
-        stopLimit = int(stopLimit * 100) / 100
+        # Round price and stopLimit to 2 decimal places
+        price = round(price, 2)
+        stopLimit = round(stopLimit, 2)
         
         order = client.futures_create_order(
             symbol=symbol,
@@ -56,9 +56,9 @@ def long_buy_order(symbol:str, price:float, stopLimit:float, quantity:float):
 
 def long_sell_order(symbol:str, price:float, stopLimit:float, quantity:float):
     try:
-        # Ensure price and stopLimit are truncated to 2 decimal places (no rounding)
-        price = int(price * 100) / 100
-        stopLimit = int(stopLimit * 100) / 100
+        # Round price and stopLimit to 2 decimal places
+        price = round(price, 2)
+        stopLimit = round(stopLimit, 2)
         
         order = client.futures_create_order(
             symbol=symbol,
@@ -78,9 +78,9 @@ def long_sell_order(symbol:str, price:float, stopLimit:float, quantity:float):
 
 def short_buy_order(symbol:str, price:float, stopLimit:float, quantity:float):
     try:
-        # Ensure price and stopLimit are truncated to 2 decimal places (no rounding)
-        price = int(price * 100) / 100
-        stopLimit = int(stopLimit * 100) / 100
+        # Round price and stopLimit to 2 decimal places
+        price = round(price, 2)
+        stopLimit = round(stopLimit, 2)
         
         order = client.futures_create_order(
             symbol=symbol,
@@ -98,9 +98,9 @@ def short_buy_order(symbol:str, price:float, stopLimit:float, quantity:float):
 
 def short_sell_order(symbol:str, price:float, stopLimit:float, quantity:float):
     try:
-        # Ensure price and stopLimit are truncated to 2 decimal places (no rounding)
-        price = int(price * 100) / 100
-        stopLimit = int(stopLimit * 100) / 100
+        # Round price and stopLimit to 2 decimal places
+        price = round(price, 2)
+        stopLimit = round(stopLimit, 2)
         
         order = client.futures_create_order(
             symbol=symbol,
@@ -174,17 +174,24 @@ def buy_long(symbol, price, stop_limit, quantity):
     Returns:
         Order details dictionary or None if error
     """
-    try:        # Truncate price and stop_limit to 2 decimal places exactly (no rounding)
-        price = int(price * 100) / 100
-        stop_limit = int(stop_limit * 100) / 100
+    try:
+        # Round price and stop_limit to 2 decimal places
+        price = round(price, 2)
+        stop_limit = round(stop_limit, 2)
         
         # Get tick size and adjust to valid exchange values
         tick_size = get_tick_size(symbol)
         price = round_to_tick(price, tick_size)
         stop_limit = round_to_tick(stop_limit, tick_size)
         
-        rich_print(f"[BUY_LONG] Truncated price: {price}, stop_limit: {stop_limit}")
-        return long_buy_order(symbol, price=price, stopLimit=stop_limit, quantity=quantity)
+        rich_print(f"[BUY_LONG] Rounded price: {price}, stop_limit: {stop_limit}")
+        order = long_buy_order(symbol, price=price, stopLimit=stop_limit, quantity=quantity)
+        
+        if order:
+            # No longer saving open orders
+            rich_print(f"[BUY_LONG] Order created: {order.get('orderId')}")
+        
+        return order
     except Exception as e:
         rich_print(f"Error in buy_long: {e}")
         return None
@@ -203,21 +210,30 @@ def sell_long(symbol, price, stop_limit, quantity):
         Order details dictionary or None if error
     """
     try:
-        # Truncate price and stop_limit to 2 decimal places exactly (no rounding)
-        price = int(price * 100) / 100
-        stop_limit = int(stop_limit * 100) / 100
+        # Round price and stop_limit to 2 decimal places
+        price = round(price, 2)
+        stop_limit = round(stop_limit, 2)
+        
+        # Make price and stop_limit the same for consistent execution
+        # Use stop_limit as the source of truth
+        price = stop_limit
         
         # Get tick size and adjust to valid exchange values
         tick_size = get_tick_size(symbol)
         price = round_to_tick(price, tick_size)
         stop_limit = round_to_tick(stop_limit, tick_size)
         
-        # Make price and stop_limit the same for consistent execution
-        # Use stop_limit as the source of truth
+        # Make sure price and stop_limit are identical
         price = stop_limit
         
-        rich_print(f"[SELL_LONG] Truncated price: {price}, stop_limit: {stop_limit}")
-        return long_sell_order(symbol, price=price, stopLimit=stop_limit, quantity=quantity)
+        rich_print(f"[SELL_LONG] Rounded price: {price}, stop_limit: {stop_limit}")
+        order = long_sell_order(symbol, price=price, stopLimit=stop_limit, quantity=quantity)
+        
+        if order:
+            # No longer saving open orders
+            rich_print(f"[SELL_LONG] Order created: {order.get('orderId')}")
+        
+        return order
     except Exception as e:
         rich_print(f"Error in sell_long: {e}")
         return None

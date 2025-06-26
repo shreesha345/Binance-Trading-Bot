@@ -39,7 +39,7 @@ def cancel_order(symbol, order_id):
     try:
         result = client.futures_cancel_order(symbol=symbol, orderId=order_id)
         rich_print(f"[ORDER] Cancelled {symbol} order {order_id}")
-        rich_print(Pretty(result))
+        
         return result
     except Exception as e:
         print(f"[ERROR] Cancelling order: {e}")
