@@ -1,6 +1,9 @@
 from datetime import datetime
-from utils.buy_sell_handler import buy_long, sell_long
+import time
+import math  # Add math module import for floor function
+from utils.buy_sell_handler import buy_long, sell_long, client, get_tick_size
 from utils.order_utils import get_order_status, cancel_order
+from utils.order_storage import save_filled_order, save_open_order, remove_open_order, enrich_order_details
 from utils.bot_state import (
     get_position, set_position,
     get_active_buy_order, set_active_buy_order,
@@ -30,6 +33,112 @@ def add_strategy_to_historical_data(historical_data):
             "position": "NONE"
         })
     return historical_data
+
+def check_order_status_multiple_times(symbol, order_id, max_attempts=3, delay_seconds=10):
+    """
+    Check order status multiple times for partially filled orders
+    
+    Args:
+        symbol: Trading pair symbol
+        order_id: ID of the order to check
+        max_attempts: Maximum number of attempts to check (default: 3)
+        delay_seconds: Delay between attempts in seconds (default: 10)
+        
+    Returns:
+        tuple: (final_status, order_details)
+    """
+    attempts = 0
+    while attempts < max_attempts:
+        status, order_details = get_order_status(symbol, order_id)
+        rich_print(f"[ORDER CHECK] Attempt {attempts+1}/{max_attempts}: Order {order_id} status: {status}")
+        
+        # If order is fully filled or in a final state, return immediately
+        if status in ["FILLED", "CANCELED", "REJECTED", "EXPIRED"]:
+            return status, order_details
+        
+        # If partially filled, wait and try again
+        if status == "PARTIALLY_FILLED":
+            rich_print(f"[ORDER CHECK] Order {order_id} partially filled. Waiting {delay_seconds}s before checking again...")
+            time.sleep(delay_seconds)
+            attempts += 1
+        else:
+            # For other statuses like NEW, just return
+            return status, order_details
+    
+    # After max attempts, get the final status
+    final_status, final_order_details = get_order_status(symbol, order_id)
+    rich_print(f"[ORDER CHECK] Final status for order {order_id} after {max_attempts} attempts: {final_status}")
+    return final_status, final_order_details
+
+def handle_filled_buy_order(row_data, symbol, order_details, filled_price):
+    """
+    Handle logic for a filled buy order
+    
+    Args:
+        row_data: Current row data for display
+        symbol: Trading pair symbol
+        order_details: Details of the filled order
+        filled_price: Price at which the order was filled
+        
+    Returns:
+        Updated row_data
+    """
+    # Update bot state
+    set_position("LONG")
+    set_buy_filled_price(filled_price)
+    
+    # Update row data for display
+    row_data["signal"] = "BUY"
+    row_data["position"] = "LONG"
+    row_data["entry"] = filled_price
+    
+    # Save the filled order details to order_book.json
+    enriched_order = enrich_order_details(
+        order_details,
+        order_type='BUY',
+        position_side='LONG',
+        filled_price=filled_price,
+        additional_info={
+            'symbol': symbol,
+            'ha_values': {
+                'ha_open': row_data.get('ha_open'),
+                'ha_high': row_data.get('ha_high'),
+                'ha_low': row_data.get('ha_low'),
+                'ha_close': row_data.get('ha_close')
+            }
+        }
+    )
+    save_filled_order(enriched_order)
+    rich_print(f"[STRATEGY] Buy order filled and saved to order_book.json: {order_details.get('orderId')}")
+    
+    # Remove from open orders if it exists there
+    remove_open_order(order_details.get('orderId'))
+    
+    # Calculate stop loss price using floor to match exchange behavior
+    # First calculate the raw price
+    raw_stop_price = row_data["ha_low"] - SELL_OFFSET
+    
+    # Apply floor with tick size for exact matching with exchange
+    tick_size = get_tick_size(symbol)
+    stop_trigger_price = math.floor(raw_stop_price / tick_size) * tick_size
+    stop_trigger_price = round(stop_trigger_price, 2)  # Ensure clean 2 decimal places
+    
+    # For display purposes, use the exact calculated value
+    row_data["stop_loss"] = stop_trigger_price
+    
+    # Get the actual filled quantity from the order details
+    filled_quantity = float(order_details.get('executedQty', QUANTITY))
+    if filled_quantity <= 0:
+        filled_quantity = QUANTITY  # Fallback to configured quantity
+    
+    rich_print(f"[STRATEGY] Creating initial stop loss after buy fill with trigger at: {stop_trigger_price}")
+    sell_order = sell_long(symbol, price=stop_trigger_price, stop_limit=stop_trigger_price, quantity=filled_quantity)
+    if sell_order:
+        set_active_sell_order(sell_order)
+        rich_print(f"[STRATEGY] Stop Loss order placed with trigger price: {stop_trigger_price}, order price: {sell_order.get('price')}")
+        rich_print(Pretty(sell_order))
+    
+    return row_data
 
 def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=True):
     """Process new candle data and execute the trading strategy"""
@@ -71,18 +180,23 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
     # Calculate buy parameters
     # Price = HA_High + BUY_OFFSET
     # Stop limit = Current HA_High (not previous candle)
-    buy_price_display = int((row_data["ha_high"] + BUY_OFFSET) * 100) / 100
+    buy_price_display = round(row_data["ha_high"] + BUY_OFFSET, 2)
     buy_price = buy_price_display  # Keep the original value for display
     
     # Use current candle HA high for stop limit
-    buy_stop_limit = int(row_data["ha_high"] * 100) / 100
+    buy_stop_limit = round(row_data["ha_high"], 2)
     
-    # Calculate sell parameters - set both price and stop_limit to HA_Low minus offset
-    sell_stop_limit_display = int((row_data["ha_low"] - SELL_OFFSET) * 100) / 100
-    sell_stop_limit = sell_stop_limit_display  # Keep the original value for display# Set display values
+    # Calculate sell parameters with math.floor for exact tick size matching
+    tick_size = get_tick_size(symbol)
+    raw_stop_price = row_data["ha_low"] - SELL_OFFSET
+    sell_stop_limit_display = math.floor(raw_stop_price / tick_size) * tick_size
+    sell_stop_limit_display = round(sell_stop_limit_display, 2)  # Format to clean 2 decimal places
+    sell_stop_limit = sell_stop_limit_display  # Keep the original value for order placement
+    
+    # Set display values
     if get_position() == "LONG":
         buy_filled_price = get_buy_filled_price() or buy_price_display
-        row_data["entry"] = int(buy_filled_price * 100) / 100
+        row_data["entry"] = round(buy_filled_price, 2)
         # For stop loss when in LONG position, use the current candle's HA_Low minus SELL_OFFSET
         row_data["stop_loss"] = sell_stop_limit_display
     elif get_position() == "NONE":
@@ -97,7 +211,9 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
     if active_buy_order and get_position() == "NONE":
         if get_candle_order_created_at() != row_data["timestamp"]:
             order_id = active_buy_order.get("orderId")
-            status, order_details = get_order_status(symbol, order_id)
+            
+            # Check the order status multiple times if needed
+            status, order_details = check_order_status_multiple_times(symbol, order_id)
             
             if status == "NEW":
                 rich_print(f"[STRATEGY] Cancelling unfilled buy order from previous candle: {order_id}")
@@ -105,27 +221,16 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
                 set_active_buy_order(None)
             elif status == "FILLED":
                 rich_print(f"[STRATEGY] Buy order filled: {order_id}")
-                set_position("LONG")
-                filled_price = int(float(order_details.get("price", 0)) * 100) / 100
-                set_buy_filled_price(filled_price)
-                row_data["signal"] = "BUY"
-                row_data["position"] = "LONG"
-                row_data["entry"] = filled_price                # Create immediate stop loss
-                current_price = float(kline["c"])                
-                # Use current candle HA_Low for the stop loss trigger price
-                stop_trigger_price = int((row_data["ha_low"] - SELL_OFFSET) * 100) / 100
-                
-                # For display purposes, use the exact calculated value
-                row_data["stop_loss"] = stop_trigger_price
-                
-                rich_print(f"[STRATEGY] Creating initial stop loss after fill with trigger at: {stop_trigger_price}")
-                sell_order = sell_long(symbol, price=stop_trigger_price, stop_limit=stop_trigger_price, quantity=QUANTITY)
-                if sell_order:
-                    set_active_sell_order(sell_order)
-                    # For exchange purposes, we need to get the actual value from the order
-                    # But we'll continue to show the exact calculated value for display
-                    rich_print(f"[STRATEGY] Stop Loss order placed with trigger price: {stop_trigger_price}, order price: {sell_order.get('price')}")
-                    rich_print(Pretty(sell_order))
+                filled_price = round(float(order_details.get("price", 0)), 2)
+                row_data = handle_filled_buy_order(row_data, symbol, order_details, filled_price)
+            elif status == "PARTIALLY_FILLED":
+                rich_print(f"[STRATEGY] Buy order partially filled: {order_id}. Not creating new orders.")
+                # Keep the order active and wait for it to be fully filled
+            elif status in ["EXPIRED", "CANCELED", "REJECTED"]:
+                rich_print(f"[STRATEGY] Buy order {status}: {order_id}. Will create new order.")
+                set_active_buy_order(None)
+            elif status == "PENDING_CANCEL":
+                rich_print(f"[STRATEGY] Buy order is pending cancellation: {order_id}. Waiting for final status.")
     
     # Place new orders if allowed - always place order to be ready for next candle
     if get_position() == "NONE" and allow_trading:
@@ -135,33 +240,19 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
         # If there's an existing order from a previous candle, check its status
         if active_buy_order:
             order_id = active_buy_order.get("orderId")
-            status, order_details = get_order_status(symbol, order_id)
+            status, order_details = check_order_status_multiple_times(symbol, order_id)
             
             if status == "FILLED":
                 # Order was filled between candles
                 rich_print(f"[STRATEGY] Buy order filled: {order_id}")
-                set_position("LONG")
-                filled_price = int(float(order_details.get("price", 0)) * 100) / 100
-                set_buy_filled_price(filled_price)
-                row_data["signal"] = "BUY"
-                row_data["position"] = "LONG"
-                row_data["entry"] = filled_price                # Create immediate stop loss after buy is filled
-                # Use current candle HA_Low for the stop loss calculation
-                stop_loss_price = int((row_data["ha_low"] - SELL_OFFSET) * 100) / 100
-                
-                # For display purposes, use the exact calculated value
-                row_data["stop_loss"] = stop_loss_price
-                
-                rich_print(f"[STRATEGY] Creating initial stop loss after fill at: {stop_loss_price}")
-                # Using the same price and stop_limit to ensure they're identical
-                sell_order = sell_long(symbol, price=stop_loss_price, stop_limit=stop_loss_price, quantity=QUANTITY)
-                if sell_order:
-                    set_active_sell_order(sell_order)
-                    # For exchange purposes, we need to use the adjusted value, but for display we keep the exact calculated value
-                    rich_print(f"[STRATEGY] Stop Loss order placed at trigger price: {stop_loss_price}")
-                    rich_print(Pretty(sell_order))
-            else:                # Cancel existing order to place a new one with updated prices
-                rich_print(f"[STRATEGY] Cancelling existing buy order to update with new prices: {order_id}")
+                filled_price = round(float(order_details.get("price", 0)), 2)
+                row_data = handle_filled_buy_order(row_data, symbol, order_details, filled_price)
+            elif status == "PARTIALLY_FILLED":
+                rich_print(f"[STRATEGY] Buy order partially filled: {order_id}. Waiting for full fill.")
+                # Keep the order active and wait for it to be fully filled
+            else:
+                # Cancel existing order to place a new one with updated prices
+                rich_print(f"[STRATEGY] Cancelling existing buy order (status: {status}) to update with new prices: {order_id}")
                 cancel_order(symbol, order_id)
                 set_active_buy_order(None)
           # If we don't have an active order (either there never was one or we just cancelled it),
@@ -173,11 +264,12 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
                 set_active_buy_order(buy_order)
                 set_candle_order_created_at(row_data["timestamp"])
                 rich_print(Pretty(buy_order))
-    elif get_position() == "LONG" and allow_trading:        # Handle stop loss orders
+    elif get_position() == "LONG" and allow_trading:
+        # Handle stop loss orders
         active_sell_order = get_active_sell_order()
         if active_sell_order:
             order_id = active_sell_order.get("orderId")
-            status, order_details = get_order_status(symbol, order_id)
+            status, order_details = check_order_status_multiple_times(symbol, order_id)
             
             if status == "FILLED":
                 rich_print(f"[STRATEGY] Sell order filled (stop loss hit): {order_id}")
@@ -200,27 +292,120 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
                 
                 # Set the stop_loss value to the actual sell price to show where position was closed
                 if executed_price > 0:
-                    row_data["stop_loss"] = int(executed_price * 100) / 100
+                    row_data["stop_loss"] = round(executed_price, 2)
                     rich_print(f"[STRATEGY] Position closed at price: {row_data['stop_loss']}")
+                
+                # Save the filled sell order details to order_book.json
+                enriched_order = enrich_order_details(
+                    order_details,
+                    order_type='SELL',
+                    position_side='LONG',
+                    filled_price=executed_price,
+                    additional_info={
+                        'symbol': symbol,
+                        'executed_price': executed_price,
+                        'is_stop_loss': True,
+                        'ha_values': {
+                            'ha_open': row_data.get('ha_open'),
+                            'ha_high': row_data.get('ha_high'),
+                            'ha_low': row_data.get('ha_low'),
+                            'ha_close': row_data.get('ha_close')
+                        }
+                    }
+                )
+                save_filled_order(enriched_order)
+                rich_print(f"[STRATEGY] Sell order filled and saved to order_book.json: {order_id}")
+                
+                # Remove from open orders if it exists there
+                remove_open_order(order_id)
+            elif status == "PARTIALLY_FILLED":
+                rich_print(f"[STRATEGY] Sell order partially filled: {order_id}. Waiting for full fill.")
+                # Keep the order active and wait for it to be fully filled
+            elif status == "EXPIRED":
+                # For expired sell orders, this could mean the position was already closed
+                # by another order or manually, so we should check the position status
+                rich_print(f"[STRATEGY] Sell order expired: {order_id}. Checking position status.")
+                
+                # Clear the sell order regardless
+                set_active_sell_order(None)
+                
+                # We don't create a new stop loss immediately because we need to determine
+                # if the position is still open
+                position_check = client.futures_position_information(symbol=symbol)
+                position_found = False
+                for pos in position_check:
+                    if pos['symbol'] == symbol and pos['positionSide'] == 'LONG' and float(pos['positionAmt']) > 0:
+                        position_found = True
+                        break
+                
+                if not position_found:
+                    # Position is closed, update the state
+                    rich_print(f"[STRATEGY] Position appears to be closed. Updating state.")
+                    set_position("CLOSED_LONG")
+                    set_active_buy_order(None)
+                    set_buy_filled_price(None)
+                    row_data["signal"] = "SELL"
+                    row_data["position"] = "CLOSED_LONG"
+                    row_data["entry"] = None
+                    # We don't have the exact closing price, so keep the existing stop_loss
             else:
-                # Cancel existing stop loss to update with new prices
+                # For all other statuses, cancel the existing order to create a new one with updated prices
+                rich_print(f"[STRATEGY] Cancelling existing sell order (status: {status}) to update with new stop loss price")
                 cancel_order(symbol, order_id)
                 set_active_sell_order(None)
-          # Create or update stop loss for the next candle
-        if get_position() == "LONG" and not get_active_sell_order():
-            # Use same value for both price and stop_limit (ha_low - SELL_OFFSET)
-            sell_stop_limit = int((row_data["ha_low"] - SELL_OFFSET) * 100) / 100
+                # We'll check again next candle
+        # Create or update stop loss for the next candle
+        if get_position() == "LONG":
+            # Always update the stop loss with each new candle
             
-            # Set display value to exact calculated value
-            row_data["stop_loss"] = sell_stop_limit
+            # Check if the position really exists (in case we missed a fill or the position was closed manually)
+            position_check = client.futures_position_information(symbol=symbol)
+            position_found = False
+            position_amt = 0
+            for pos in position_check:
+                if pos['symbol'] == symbol and pos['positionSide'] == 'LONG' and float(pos['positionAmt']) > 0:
+                    position_found = True
+                    position_amt = float(pos['positionAmt'])
+                    break
             
-            rich_print(f"[STRATEGY] Creating/updating stop loss for next candle: {symbol} at price: {sell_stop_limit}, stop_limit: {sell_stop_limit}")
-            # Use the same value for both price and stop_limit
-            sell_order = sell_long(symbol, price=sell_stop_limit, stop_limit=sell_stop_limit, quantity=QUANTITY)
-            if sell_order:
-                set_active_sell_order(sell_order)
-                # Keep using the exact calculated value for display
-                rich_print(f"[STRATEGY] Stop Loss order placed with trigger price: {sell_stop_limit}, order price: {sell_order.get('price')}")
-                rich_print(Pretty(sell_order))
+            # Only create a new stop loss if the position actually exists
+            if position_found:
+                # Calculate the new stop loss price based on current candle with tick size adjustment
+                raw_stop_price = row_data["ha_low"] - SELL_OFFSET
+                tick_size = get_tick_size(symbol)
+                sell_stop_limit = math.floor(raw_stop_price / tick_size) * tick_size
+                sell_stop_limit = round(sell_stop_limit, 2)  # Format to clean 2 decimal places
+                
+                # Set display value to exact calculated value
+                row_data["stop_loss"] = sell_stop_limit
+                
+                # First, cancel any existing stop loss order
+                if get_active_sell_order():
+                    order_id = get_active_sell_order().get("orderId")
+                    rich_print(f"[STRATEGY] Cancelling existing stop loss order to update with new price: {order_id}")
+                    cancel_order(symbol, order_id)
+                    set_active_sell_order(None)
+                
+                # Create new stop loss order with updated price
+                rich_print(f"[STRATEGY] Creating/updating stop loss for next candle: {symbol} at price: {sell_stop_limit}, stop_limit: {sell_stop_limit}")
+                # Use the same value for both price and stop_limit
+                sell_order = sell_long(symbol, price=sell_stop_limit, stop_limit=sell_stop_limit, quantity=position_amt)
+                if sell_order:
+                    set_active_sell_order(sell_order)
+                    # Keep using the exact calculated value for display
+                    rich_print(f"[STRATEGY] Stop Loss order placed with trigger price: {sell_stop_limit}, order price: {sell_order.get('price')}")
+                    rich_print(Pretty(sell_order))
+                else:
+                    rich_print(f"[STRATEGY] Failed to create stop loss order. Will try again with next candle.")
+            else:
+                # Position not found, update the state
+                rich_print(f"[STRATEGY] Position not found in exchange. Updating state to CLOSED_LONG.")
+                set_position("CLOSED_LONG")
+                set_active_buy_order(None)
+                set_buy_filled_price(None)
+                row_data["signal"] = "SELL"
+                row_data["position"] = "CLOSED_LONG"
+                row_data["entry"] = None
+                # We don't have the exact closing price, so keep the existing stop_loss
     
     return row_data
