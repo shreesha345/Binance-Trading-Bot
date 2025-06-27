@@ -6,6 +6,7 @@ from rich import print as rich_print
 from rich.pretty import Pretty
 import math
 from utils.order_storage import save_filled_order, enrich_order_details
+from utils.logger import log_websocket, log_error
 
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET, testnet=MODE)
@@ -26,9 +27,9 @@ def round_to_tick(price, tick_size):
 def enable_hedge_mode():
     try:
         client.futures_change_position_mode(dualSidePosition=True)
-        print("Hedge mode enabled.")
+        log_websocket("Hedge mode enabled.")
     except Exception as e:
-        print(f"Error enabling hedge mode: {e}")
+        log_error(f"Error enabling hedge mode: {e}", exc_info=True)
 
 # enable_hedge_mode()
 
@@ -49,7 +50,7 @@ def long_buy_order(symbol:str, price:float, stopLimit:float, quantity:float):
         )
         return order
     except Exception as e:
-        print(f"Error creating long buy order: {e}")
+        log_error(f"Error creating long buy order: {e}", exc_info=True)
         return None
 
 
@@ -71,7 +72,7 @@ def long_sell_order(symbol:str, price:float, stopLimit:float, quantity:float):
         )
         return order
     except Exception as e:
-        print(f"Error creating long sell order: {e}")
+        log_error(f"Error creating long sell order: {e}", exc_info=True)
         return None
 
 
@@ -93,7 +94,7 @@ def short_buy_order(symbol:str, price:float, stopLimit:float, quantity:float):
         )
         return order
     except Exception as e:
-        print(f"Error creating short buy order: {e}")
+        log_error(f"Error creating short buy order: {e}", exc_info=True)
         return None
 
 def short_sell_order(symbol:str, price:float, stopLimit:float, quantity:float):
@@ -113,7 +114,7 @@ def short_sell_order(symbol:str, price:float, stopLimit:float, quantity:float):
         )
         return order
     except Exception as e:
-        print(f"Error creating short sell order: {e}")
+        log_error(f"Error creating short sell order: {e}", exc_info=True)
         return None
 
 
@@ -157,9 +158,10 @@ def print_order_info(order):
     """
     info = format_order_info(order)
     if info:
-        rich_print(Pretty(info))
+        # Convert the Pretty object to a string representation and log it
+        log_websocket(f"{info}")
     else:
-        print("No order information available")
+        log_websocket("No order information available")
 
 def buy_long(symbol, price, stop_limit, quantity):
     """
@@ -184,16 +186,29 @@ def buy_long(symbol, price, stop_limit, quantity):
         price = round_to_tick(price, tick_size)
         stop_limit = round_to_tick(stop_limit, tick_size)
         
-        rich_print(f"[BUY_LONG] Rounded price: {price}, stop_limit: {stop_limit}")
+        log_websocket(f"[BUY_LONG] Rounded price: {price}, stop_limit: {stop_limit}")
+        
+        # Check current market price to avoid "would immediately trigger" error
+        try:
+            ticker = client.futures_symbol_ticker(symbol=symbol)
+            current_price = float(ticker['price'])
+            
+            if current_price >= stop_limit:
+                log_websocket(f"[BUY_LONG] Cannot place stop order - current price ({current_price}) is already above stop limit ({stop_limit})")
+                return None
+        except Exception as e:
+            log_error(f"Error checking market price in buy_long: {e}", exc_info=True)
+            # Continue with order attempt even if price check fails
+        
         order = long_buy_order(symbol, price=price, stopLimit=stop_limit, quantity=quantity)
         
         if order:
             # No longer saving open orders
-            rich_print(f"[BUY_LONG] Order created: {order.get('orderId')}")
+            log_websocket(f"[BUY_LONG] Order created: {order.get('orderId')}")
         
         return order
     except Exception as e:
-        rich_print(f"Error in buy_long: {e}")
+        log_error(f"Error in buy_long: {e}", exc_info=True)
         return None
 
 def sell_long(symbol, price, stop_limit, quantity):
@@ -226,16 +241,16 @@ def sell_long(symbol, price, stop_limit, quantity):
         # Make sure price and stop_limit are identical
         price = stop_limit
         
-        rich_print(f"[SELL_LONG] Rounded price: {price}, stop_limit: {stop_limit}")
+        log_websocket(f"[SELL_LONG] Rounded price: {price}, stop_limit: {stop_limit}")
         order = long_sell_order(symbol, price=price, stopLimit=stop_limit, quantity=quantity)
         
         if order:
             # No longer saving open orders
-            rich_print(f"[SELL_LONG] Order created: {order.get('orderId')}")
+            log_websocket(f"[SELL_LONG] Order created: {order.get('orderId')}")
         
         return order
     except Exception as e:
-        rich_print(f"Error in sell_long: {e}")
+        log_error(f"Error in sell_long: {e}", exc_info=True)
         return None
 
 
@@ -247,9 +262,9 @@ if __name__ == "__main__":
     # # Example usage
     # buy = long_buy_order(symbol, price=2505.73, stopLimit=2505.23, quantity=quantity)
     # sell = long_sell_order(symbol, price=2498.97, stopLimit=2499.47, quantity=quantity)
-    # print("Order buy created:")
+    # log_websocket("Order buy created:")
     # print_order_info(buy)
-    # print("Order sell created:")
+    # log_websocket("Order sell created:")
     # print_order_info(sell)
     # # long_sell_order(symbol, 31000, 31100, quantity)
     # # short_buy_order(symbol, 29000, 28900, quantity)
@@ -258,10 +273,10 @@ if __name__ == "__main__":
     # price = round_to_tick(84.38, tick_size)
     # stopLimit = round_to_tick(85.40, tick_size)
 
-    # print(f"Tick size for {symbol}: {tick_size}")
-    # print(f"Rounded price: {price}, Rounded stop limit: {stopLimit}")
+    # log_websocket(f"Tick size for {symbol}: {tick_size}")
+    # log_websocket(f"Rounded price: {price}, Rounded stop limit: {stopLimit}")
 
     # short_sell_order(symbol, price=104526.05, stopLimit=104526.10, quantity=quantity)
-    # print(get_tick_size('LTCUSDT'))
+    # log_websocket(get_tick_size('LTCUSDT'))
     # Print all orders for verification
     # pprint(client.futures_get_all_orders(symbol=symbol))
