@@ -4,6 +4,7 @@ import os
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from utils.config import MODE, BINANCE_API_KEY, BINANCE_API_SECRET
+from utils.logger import log_websocket, log_error
 
 def setup_binance_client():
     """
@@ -14,8 +15,8 @@ def setup_binance_client():
     api_secret = BINANCE_API_SECRET
 
     if not api_key or not api_secret:
-        print("Warning: API key and secret not found. Set BINANCE_API_KEY and BINANCE_API_SECRET environment variables.")
-        print("You can create API keys at https://www.binance.com/en/my/settings/api-management")
+        log_websocket("Warning: API key and secret not found. Set BINANCE_API_KEY and BINANCE_API_SECRET environment variables.")
+        log_websocket("You can create API keys at https://www.binance.com/en/my/settings/api-management")
     
     return Client(api_key, api_secret, testnet=MODE)
 
@@ -205,11 +206,11 @@ def get_heikin_ashi_by_datetime(symbol, interval, target_datetime_str):
             end_time=end_time_ms
         )
     except BinanceAPIException as e:
-        print(f"Error fetching klines: {e}")
+        log_error(f"Error fetching klines: {e}")
         return None
 
     if not klines:
-        print("No data received.")
+        log_websocket("No data received.")
         return None
     
     # Find the exact candle for the target datetime with interval-specific matching
@@ -286,7 +287,7 @@ def get_heikin_ashi_by_datetime(symbol, interval, target_datetime_str):
                     break
     
     if target_candle_index == -1:
-        print(f"No {interval} candle found for the specified datetime: {target_datetime_str}")
+        log_websocket(f"No {interval} candle found for the specified datetime: {target_datetime_str}")
         return None
     
     # Convert all candles to Heikin Ashi (we need previous candles for proper calculation)
@@ -300,40 +301,40 @@ def print_heikin_ashi_candle(candle):
     Print Heikin Ashi candle data in a formatted way.
     """
     if not candle:
-        print("No candle data available.")
+        log_websocket("No candle data available.")
         return
     
-    print(f"\n📊 Heikin Ashi Candle for {candle['open_time']} UTC")
-    print(f"Symbol: {candle.get('symbol', 'Unknown')}")
-    print(f"Volume: {candle['volume']}")
-    print(f"Number of Trades: {candle['number_of_trades']}")
+    log_websocket(f"\n📊 Heikin Ashi Candle for {candle['open_time']} UTC")
+    log_websocket(f"Symbol: {candle.get('symbol', 'Unknown')}")
+    log_websocket(f"Volume: {candle['volume']}")
+    log_websocket(f"Number of Trades: {candle['number_of_trades']}")
     
-    print("\nRegular Candle Values:")
-    print(f"Open: {candle['regular_open']}")
-    print(f"High: {candle['regular_high']}")
-    print(f"Low: {candle['regular_low']}")
-    print(f"Close: {candle['regular_close']}")
+    log_websocket("\nRegular Candle Values:")
+    log_websocket(f"Open: {candle['regular_open']}")
+    log_websocket(f"High: {candle['regular_high']}")
+    log_websocket(f"Low: {candle['regular_low']}")
+    log_websocket(f"Close: {candle['regular_close']}")
     
-    print("\nHeikin Ashi Values:")
-    print(f"HA Open: {candle['ha_open']}")
-    print(f"HA High: {candle['ha_high']}")
-    print(f"HA Low: {candle['ha_low']}")
-    print(f"HA Close: {candle['ha_close']}")
+    log_websocket("\nHeikin Ashi Values:")
+    log_websocket(f"HA Open: {candle['ha_open']}")
+    log_websocket(f"HA High: {candle['ha_high']}")
+    log_websocket(f"HA Low: {candle['ha_low']}")
+    log_websocket(f"HA Close: {candle['ha_close']}")
 
 # Test the function if run directly
 if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 4:
-        print("Usage: python historical_handler.py <symbol> <interval> <target_datetime>")
-        print("Example: python historical_handler.py BTCUSDT 1m '15-06-2023 12:30'")
+        log_websocket("Usage: python historical_handler.py <symbol> <interval> <target_datetime>")
+        log_websocket("Example: python historical_handler.py BTCUSDT 1m '15-06-2023 12:30'")
         sys.exit(1)
     
     symbol = sys.argv[1]
     interval = sys.argv[2]
     target_datetime = sys.argv[3]
     
-    print(f"Fetching Heikin Ashi candle for {symbol} at {target_datetime} with {interval} interval...")
+    log_websocket(f"Fetching Heikin Ashi candle for {symbol} at {target_datetime} with {interval} interval...")
     
     candle = get_heikin_ashi_by_datetime(symbol, interval, target_datetime)
     print_heikin_ashi_candle(candle)
