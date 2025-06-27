@@ -1,4 +1,9 @@
 # Table/printing functions for websocket client
+import io
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from utils.logger import get_colored_signal, get_colored_position
 
 # ANSI color codes
 GREEN = '\033[92m'   # Green for BUY signals and LONG positions
@@ -6,7 +11,13 @@ RED = '\033[91m'     # Red for SELL signals
 GREY = '\033[90m'    # Light grey for HOLD signals and NONE positions
 RESET = '\033[0m'    # Reset color
 
-def print_ohlcv_table_with_signals(data, show_heikin_ashi=True):
+def print_ohlcv_table_with_signals(data, show_heikin_ashi=True, return_output=False):
+    # If return_output is True, redirect stdout to a string buffer
+    if return_output:
+        old_stdout = sys.stdout
+        output_buffer = io.StringIO()
+        sys.stdout = output_buffer
+    
     # Fixed column widths
     col_widths = {
         'time': 8,
@@ -15,7 +26,7 @@ def print_ohlcv_table_with_signals(data, show_heikin_ashi=True):
         'signal': 10,
         'entry': 10,
         'sl': 10,
-        'position': 8
+        'position': 10
     }
     
     # Print table header
@@ -39,28 +50,10 @@ def print_ohlcv_table_with_signals(data, show_heikin_ashi=True):
         
         # Format position display (LONG or NONE) with color
         position_str = position if position else 'NONE'
-          # Create colored versions of signal and position
-        colored_signal = signal
-        colored_position = position_str
-        
-        if signal == 'BUY':
-            colored_signal = f"{GREEN}{signal}{RESET}"
-        elif signal == 'SELL':
-            colored_signal = f"{RED}{signal}{RESET}"
-            # When selling, show the position in red to indicate it's being exited
-            if position_str == 'LONG' or position_str == 'CLOSED_LONG':
-                colored_position = f"{RED}{position_str}{RESET}"
-        elif signal == 'HOLD':
-            colored_signal = f"{GREY}{signal}{RESET}"
-            
-        # For non-SELL signals, apply normal coloring
-        if signal != 'SELL':
-            if position_str == 'LONG':
-                colored_position = f"{GREEN}{position_str}{RESET}"
-            elif position_str == 'NONE':
-                colored_position = f"{GREY}{position_str}{RESET}"
-            elif position_str == 'CLOSED_LONG':
-                colored_position = f"{RED}{position_str}{RESET}"
+          
+        # Get colored versions using our logger helper functions
+        colored_signal = get_colored_signal(signal)
+        colored_position = get_colored_position(position_str)
         
         # Build the line
         line = f"{row['time']:<{col_widths['time']}} {row['symbol']:<{col_widths['symbol']}}"
@@ -71,7 +64,7 @@ def print_ohlcv_table_with_signals(data, show_heikin_ashi=True):
             line += f" {row['open']:<{col_widths['ohlc']}.2f} {row['high']:<{col_widths['ohlc']}.2f}"
             line += f" {row['low']:<{col_widths['ohlc']}.2f} {row['close']:<{col_widths['ohlc']}.2f}"
             
-        # Fixed width columns with padding for color codes
+        # Fixed width columns with padding for signal and position text only (not ANSI codes)
         padding_signal = " " * (col_widths['signal'] - len(signal))
         padding_entry = " " * (col_widths['entry'] - len(entry_str))
         padding_sl = " " * (col_widths['sl'] - len(sl_str))
@@ -80,3 +73,9 @@ def print_ohlcv_table_with_signals(data, show_heikin_ashi=True):
         # Add signal, entry, SL, and position with proper spacing
         line += f" {colored_signal}{padding_signal}   {entry_str}{padding_entry}   {sl_str}{padding_sl} {colored_position}{padding_position}"
         print(line)
+    
+    # If return_output is True, get the output and restore stdout
+    if return_output:
+        output = output_buffer.getvalue()
+        sys.stdout = old_stdout
+        return output
