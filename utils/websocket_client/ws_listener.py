@@ -1,6 +1,10 @@
 import websockets
 import json
 import asyncio
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from utils.logger import log_websocket, log_error
 
 FUTURES_MAINNET_WS_URL = "wss://fstream.binance.com/ws"
 FUTURES_TESTNET_WS_URL = "wss://stream.binancefuture.com/ws"
@@ -28,9 +32,10 @@ async def ohlc_listener_futures_ws(symbol: str, interval: str, callback, testnet
     while retry_count < max_retries:
         try:
             if retry_count > 0:
-                print(f"📡 Attempting to reconnect... (Attempt {retry_count}/{max_retries})")
+                log_websocket(f"📡 Attempting to reconnect... (Attempt {retry_count}/{max_retries})")
             else:
-                print(f"📡 Connected to {'futures testnet' if testnet else 'futures mainnet'}: {url}")
+                log_websocket(f"🔌 Starting WebSocket connection for {symbol.upper()}...")
+                log_websocket(f"📡 Connected to {'futures testnet' if testnet else 'futures mainnet'}: {url}")
                 
             async with websockets.connect(url) as ws:
                 # Reset retry count on successful connection
@@ -42,29 +47,33 @@ async def ohlc_listener_futures_ws(symbol: str, interval: str, callback, testnet
                     await callback(kline)
                     
         except KeyboardInterrupt:
-            print("📡 WebSocket connection closed by user")
+            log_websocket("📡 WebSocket connection closed by user")
             raise
             
         except websockets.exceptions.ConnectionClosedError as e:
             retry_count += 1
             current_delay = retry_delay * (backoff_factor ** (retry_count - 1))
             
-            print(f"📡 WebSocket connection closed: {e}")
+            log_websocket(f"📡 WebSocket connection closed: {e}")
+            log_error(f"WebSocket connection closed: {e}", exc_info=True)
+            
             if retry_count < max_retries:
-                print(f"📡 Reconnecting in {current_delay:.1f} seconds...")
+                log_websocket(f"📡 Reconnecting in {current_delay:.1f} seconds...")
                 await asyncio.sleep(current_delay)
             else:
-                print(f"📡 Maximum retries ({max_retries}) reached. Giving up.")
+                log_websocket(f"📡 Maximum retries ({max_retries}) reached. Giving up.")
                 raise
                 
         except Exception as e:
-            print(f"📡 WebSocket connection error: {e}")
+            log_websocket(f"📡 WebSocket connection error: {e}")
+            log_error(f"WebSocket connection error: {e}", exc_info=True)
+            
             retry_count += 1
             current_delay = retry_delay * (backoff_factor ** (retry_count - 1))
             
             if retry_count < max_retries:
-                print(f"📡 Reconnecting in {current_delay:.1f} seconds...")
+                log_websocket(f"📡 Reconnecting in {current_delay:.1f} seconds...")
                 await asyncio.sleep(current_delay)
             else:
-                print(f"📡 Maximum retries ({max_retries}) reached. Giving up.")
+                log_websocket(f"📡 Maximum retries ({max_retries}) reached. Giving up.")
                 raise
