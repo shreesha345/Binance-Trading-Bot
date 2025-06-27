@@ -1,5 +1,9 @@
 import asyncio
 from datetime import datetime
+import sys
+import os
+import traceback
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from utils.websocket_client.ws_listener import ohlc_listener_futures_ws
 from utils.websocket_client.ha_utils import get_historical_ha_data, align_time_to_interval
 from utils.websocket_client.clear_screen import clear_screen
@@ -8,6 +12,7 @@ from utils.websocket_client.heikin_ashi import calculate_heikin_ashi
 from utils.websocket_client.strategy import format_row_with_strategy, add_strategy_to_historical_data
 from utils.config import QUANTITY, DEBUG_MODE, SHOW_ERRORS
 from utils.bot_state import reset_state
+from utils.logger import log_websocket, log_error
 
 async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = False, debug_mode: bool = False):
     display_data = []
@@ -33,7 +38,8 @@ async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = Fa
             # Show initial data - only clear screen if not in debug mode
             if not debug_mode and not DEBUG_MODE:
                 clear_screen()
-            print_ohlcv_table_with_signals([latest_historical], show_heikin_ashi)
+            table_output = print_ohlcv_table_with_signals([latest_historical], show_heikin_ashi, return_output=True)
+            log_websocket(table_output)
             
             # Use the last historical candle for HA calculations
             previous_ha_candle = {
@@ -84,21 +90,23 @@ async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = Fa
               # Update display - only clear screen if not in debug mode
             if not DEBUG_MODE:
                 clear_screen()
-            print_ohlcv_table_with_signals(display_data, show_heikin_ashi)
+            table_output = print_ohlcv_table_with_signals(display_data, show_heikin_ashi, return_output=True)
+            log_websocket(table_output)
             
         # Start websocket listener with retry mechanism
-        print(f"🔌 Starting WebSocket connection for {symbol}...")
         await ohlc_listener_futures_ws(symbol, interval, on_kline, testnet=testnet)
         
     except KeyboardInterrupt:
-        print("\n🔄 Shutting down gracefully...")
+        log_websocket("\n🔄 Shutting down gracefully...")
         raise
     except Exception as e:
-        print(f"\n❌ Error in strategy collector: {e}")
+        error_msg = f"\n❌ Error in strategy collector: {e}"
+        log_websocket(error_msg)
+        log_error(f"Error in strategy collector: {e}", exc_info=True)
+        
         if SHOW_ERRORS:
-            import traceback
-            print("\nDetailed error information:")
-            traceback.print_exc()
-        print("\n🔄 The connection will be retried automatically...")
-        raise
+            error_details = "\nDetailed error information:\n" + traceback.format_exc()
+            log_websocket(error_details)
+        
+        log_websocket("\n🔄 The connection will be retried automatically...")
         raise
