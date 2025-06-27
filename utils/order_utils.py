@@ -3,6 +3,7 @@ from config import BINANCE_API_KEY, BINANCE_API_SECRET, MODE
 import time
 from rich import print as rich_print
 from rich.pretty import Pretty
+from utils.logger import log_websocket, log_error
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET, testnet=MODE)
 
@@ -19,10 +20,10 @@ def get_order_status(symbol, order_id):
     """
     try:
         order = client.futures_get_order(symbol=symbol, orderId=order_id)
-        rich_print(f"[ORDER] Status for {symbol} order {order_id}: {order.get('status', 'Unknown')}")
+        log_websocket(f"[ORDER] Status for {symbol} order {order_id}: {order.get('status', 'Unknown')}")
         return order.get('status', None), order
     except Exception as e:
-        print(f"[ERROR] Fetching order status: {e}")
+        log_error(f"[ERROR] Fetching order status: {e}", exc_info=True)
         return None, None
 
 def cancel_order(symbol, order_id):
@@ -38,11 +39,11 @@ def cancel_order(symbol, order_id):
     """
     try:
         result = client.futures_cancel_order(symbol=symbol, orderId=order_id)
-        rich_print(f"[ORDER] Cancelled {symbol} order {order_id}")
+        log_websocket(f"[ORDER] Cancelled {symbol} order {order_id}")
         
         return result
     except Exception as e:
-        print(f"[ERROR] Cancelling order: {e}")
+        log_error(f"[ERROR] Cancelling order: {e}", exc_info=True)
         return None
 
 def wait_for_order_fill(symbol, order_id, timeout=60, check_interval=5):
@@ -62,13 +63,13 @@ def wait_for_order_fill(symbol, order_id, timeout=60, check_interval=5):
     while time.time() - start_time < timeout:
         status, order = get_order_status(symbol, order_id)
         if status == 'FILLED':
-            print(f"[ORDER] Order {order_id} has been filled!")
+            log_websocket(f"[ORDER] Order {order_id} has been filled!")
             return True
         elif status in ['CANCELED', 'REJECTED', 'EXPIRED']:
-            print(f"[ORDER] Order {order_id} status: {status}")
+            log_websocket(f"[ORDER] Order {order_id} status: {status}")
             return False
-        print(f"[ORDER] Waiting for order {order_id} to fill. Current status: {status}")
+        log_websocket(f"[ORDER] Waiting for order {order_id} to fill. Current status: {status}")
         time.sleep(check_interval)
     
-    print(f"[WARNING] Order {order_id} not filled after {timeout} seconds")
+    log_websocket(f"[WARNING] Order {order_id} not filled after {timeout} seconds")
     return False
