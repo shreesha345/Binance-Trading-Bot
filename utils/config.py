@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv
 from binance.client import Client  # Importing Client from python-binance
-
 # Load environment variables from .env file
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
@@ -22,7 +21,9 @@ def get_binance_keys():
         api_key = os.getenv('BINANCE_API_KEY')
         secret_key = os.getenv('BINANCE_SECRET_KEY')
 
-    return api_key, secret_key
+    gemini_api_key = os.getenv('GEMINI_API_KEY')
+
+    return api_key, secret_key, gemini_api_key
 
 
 def print_mode_status():
@@ -41,7 +42,7 @@ def print_mode_status():
 MODE = print_mode_status()
 TEST = MODE  # For backward compatibility
 
-BINANCE_API_KEY, BINANCE_API_SECRET = get_binance_keys()
+BINANCE_API_KEY, BINANCE_API_SECRET, GEMINI_API_KEY = get_binance_keys()
 
 # print(f"Binance API Key: {BINANCE_API_KEY}")
 # print(f"Binance API Secret: {BINANCE_API_SECRET}")
