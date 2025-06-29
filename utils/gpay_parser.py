@@ -106,3 +106,6 @@ generate_upi_qr("shashikalaaithal97-1@okaxis", "EEREXXX", "1")
 # response_json = parse_gpay_payment_from_image("C:\\D-drive\\binance_trading_bot\\payments\\image.png")
 
 # print(response_json)
+
+
+
