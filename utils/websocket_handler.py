@@ -11,7 +11,7 @@ from utils.config import MODE, DEBUG_MODE, SHOW_ERRORS, TRADING_SYMBOL, CANDLE_I
 from utils.websocket_client.ohlc_collector import ohlc_strategy_collector
 from utils.logger import log_websocket, log_error
 
-def main():
+def websocket_runner():
     # Process command line arguments
     debug_arg = "--debug" in sys.argv or "-d" in sys.argv
     debug_mode = DEBUG_MODE or debug_arg
@@ -79,5 +79,5 @@ def main():
         log_websocket("👋 Bot stopped due to too many reconnection attempts")
 
 if __name__ == "__main__":
-    main()
+    websocket_runner()
 
