@@ -58,8 +58,23 @@ websocket_formatter = ANSIStrippingFormatter('%(message)s')
 websocket_handler.setFormatter(websocket_formatter)
 websocket_logger.addHandler(websocket_handler)
 
+# API log file handler
+api_logger = logging.getLogger('api')
+api_logger.setLevel(logging.INFO)
+api_handler = RotatingFileHandler(
+    os.path.join(logs_dir, 'api.log'),
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+api_formatter = ANSIStrippingFormatter('%(asctime)s - %(levelname)s - %(message)s')
+api_handler.setFormatter(api_formatter)
+api_logger.addHandler(api_handler)
+
 # This ensures websocket logger doesn't propagate to root logger
 websocket_logger.propagate = False
+
+# This ensures API logger doesn't propagate to root logger
+api_logger.propagate = False
 
 
 def strip_ansi_codes(text):
@@ -84,6 +99,13 @@ def log_error(message, exc_info=None):
     ANSI color codes will be stripped in the log file.
     """
     root_logger.error(message, exc_info=exc_info)
+
+
+def log_api(message):
+    """
+    Log a message to the API log file.
+    """
+    api_logger.info(message)
 
 
 def get_websocket_logger():
