@@ -1,4 +1,5 @@
 import os
+import json
 from dotenv import load_dotenv
 from binance.client import Client  # Importing Client from python-binance
 # Load environment variables from .env file
@@ -48,15 +49,24 @@ BINANCE_API_KEY, BINANCE_API_SECRET, GEMINI_API_KEY = get_binance_keys()
 # print(f"Binance API Secret: {BINANCE_API_SECRET}")
 
 # Trading parameters
-QUANTITY = float(os.getenv('QUANTITY', '0.01'))  # Default quantity for trades
-BUY_OFFSET = float(os.getenv('BUY_OFFSET', '0.0'))  # Offset for buy price
-SELL_OFFSET = float(os.getenv('SELL_OFFSET', '0.0'))  # Offset for sell price
+# BUY_OFFSET = float(os.getenv('BUY_OFFSET', '0.0'))  # Offset for buy price
+# SELL_OFFSET = float(os.getenv('SELL_OFFSET', '0.0'))  # Offset for sell price
 
 # Trading symbol - this is the source of truth for the symbol to trade
-TRADING_SYMBOL = "ETHUSDT"
+# TRADING_SYMBOL = "ETHUSDT"
 
-# Time settings
-CANDLE_INTERVAL = '1m'  # Candle interval ('1m', '5m', '15m', '1h', etc.)
+# Path to trading_config.json in the api folder
+TRADING_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api', 'trading_config.json')
+
+# Load trading config
+with open(TRADING_CONFIG_PATH, 'r') as f:
+    trading_config = json.load(f)
+
+QUANTITY = float(trading_config.get('quantity', os.getenv('QUANTITY', '0.01')))
+TRADING_SYMBOL = trading_config.get('symbol_name')
+SELL_OFFSET = trading_config.get('sell_long_offset')
+BUY_OFFSET = trading_config.get('buy_long_offset')
+CANDLE_INTERVAL = trading_config.get('candle_interval')
 
 # Order settings
 MAX_ORDERS = 1  # Maximum number of open orders per symbol
