@@ -3,9 +3,9 @@
     "first_payment_made": false,
     "reminder_sent": false,
     "service_active": true,
-    "symbol_name": "BTCUSDT",
-    "sell_long_offset": 1,
-    "buy_long_offset": 1,
-    "quantity": 1,
-    "candle_interval": "5m"
+    "symbol_name": "ETHUSDT",
+    "sell_long_offset": "1",
+    "buy_long_offset": "1",
+    "quantity": "1",
+    "candle_interval": "1m"
 }
