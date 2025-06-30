@@ -64,8 +64,8 @@ with open(TRADING_CONFIG_PATH, 'r') as f:
 
 QUANTITY = float(trading_config.get('quantity', os.getenv('QUANTITY', '0.01')))
 TRADING_SYMBOL = trading_config.get('symbol_name')
-SELL_OFFSET = trading_config.get('sell_long_offset')
-BUY_OFFSET = trading_config.get('buy_long_offset')
+SELL_OFFSET = float(trading_config.get('sell_long_offset', 0))
+BUY_OFFSET = float(trading_config.get('buy_long_offset', 0))
 CANDLE_INTERVAL = trading_config.get('candle_interval')
 
 # Order settings
