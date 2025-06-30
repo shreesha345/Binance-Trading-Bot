@@ -3,6 +3,7 @@ from datetime import datetime
 import sys
 import os
 import traceback
+import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from utils.websocket_client.ws_listener import ohlc_listener_futures_ws
 from utils.websocket_client.ha_utils import get_historical_ha_data, align_time_to_interval
@@ -14,7 +15,27 @@ from utils.config import QUANTITY, DEBUG_MODE, SHOW_ERRORS
 from utils.bot_state import reset_state
 from utils.logger import log_websocket, log_error
 
+try:
+    from binance.client import Client
+except ImportError:
+    Client = None
+
 async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = False, debug_mode: bool = False):
+    # Sync system time with Binance server time if possible
+    if Client is not None:
+        try:
+            # You may want to use your actual API keys here if needed
+            client = Client()
+            server_time = client.futures_time()['serverTime']
+            local_time = int(time.time() * 1000)
+            time_diff = server_time - local_time
+            if abs(time_diff) > 1000:
+                log_websocket(f"⚠️ Local time is off by {time_diff} ms from Binance server time. Please sync your system clock.")
+            else:
+                log_websocket(f"⏰ Local time is synchronized with Binance server (diff: {time_diff} ms)")
+        except Exception as e:
+            log_websocket(f"⚠️ Could not fetch Binance server time: {e}")
+            
     display_data = []
     show_heikin_ashi = True
     last_candle_time = None
