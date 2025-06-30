@@ -8,6 +8,8 @@ import os
 import json
 from typing import Optional, Any, Dict
 from pydantic import Field
+import base64
+import tempfile
 
 router = APIRouter()
 
@@ -80,39 +82,48 @@ last_sent_data: Optional[dict] = None
 @router.get("/order_book/last_update")
 def order_book_last_update():
     """
-    Returns the full order_book.json only if it has been updated since the last call, else returns None.
+    Returns only the latest filled order from order_book.json.
     """
-    global last_sent_mtime, last_sent_data
     order_book_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'order_book.json')
     if not os.path.exists(order_book_path) or os.path.getsize(order_book_path) == 0:
-        last_sent_mtime = None
-        last_sent_data = None
-        return JSONResponse(content=None, status_code=204)
-    mtime = os.path.getmtime(order_book_path)
-    if last_sent_mtime is not None and mtime == last_sent_mtime:
-        return {"data": None}
+        return JSONResponse(content={"filled_orders": []}, status_code=204)
     with open(order_book_path, 'r', encoding='utf-8') as f:
         try:
             data = json.load(f)
         except Exception:
             return JSONResponse(content={"error": "Invalid JSON in order_book.json"}, status_code=500)
-    last_sent_mtime = mtime
-    last_sent_data = data
-    return {"data": data}
+    # Only consider filled orders
+    filled_orders = [order for order in data if order.get('status') == 'FILLED'] if isinstance(data, list) else []
+    if not filled_orders:
+        return {"filled_orders": []}
+    # Get the latest order by orderId or recorded_at
+    def get_order_sort_key(order):
+        meta = order.get("meta", {})
+        return (
+            int(order.get("orderId", 0)),
+            str(order.get("saved_at") or meta.get("recorded_at") or "")
+        )
+    latest = max(filled_orders, key=get_order_sort_key)
+    return {"filled_orders": [latest]}
 
 
 @router.get("/gpay/generate_qr")
-def generate_qr_api(payee_vpa: str, message: str, amount: str, filename: str = "upi_qr_code.png"):
+def generate_qr_api(payee_vpa: str, message: str, amount: str):
     """
-    Generate a UPI QR code and return the image file.
+    Generate a UPI QR code and return the image as a base64 string.
+    The image is not stored in the payments folder.
     """
     from utils.gpay_parser import generate_upi_qr
-    generate_upi_qr(payee_vpa, message, amount, filename)
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    file_path = os.path.join(project_root, "payments", filename)
-    if not os.path.exists(file_path):
-        return JSONResponse(content={"error": "QR code not generated"}, status_code=500)
-    return FileResponse(file_path, media_type="image/png", filename=filename)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        temp_path = tmp.name
+    try:
+        generate_upi_qr(payee_vpa, message, amount, temp_path)
+        with open(temp_path, "rb") as img_file:
+            b64_string = base64.b64encode(img_file.read()).decode("utf-8")
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    return {"image_base64": b64_string}
 
 @router.post("/gpay/scan_image")
 def scan_gpay_image_api(file: UploadFile = File(...)):
@@ -166,3 +177,18 @@ def update_trading_config(req: TradingConfigUpdateRequest):
     with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=4)
     return {"status": "success", "updated_config": config}
+
+@router.get("/trading_config")
+def get_trading_config():
+    """
+    Get the current trading_config.json contents.
+    """
+    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api', 'trading_config.json')
+    if not os.path.exists(config_path):
+        return JSONResponse(content={"error": "trading_config.json not found"}, status_code=404)
+    with open(config_path, 'r', encoding='utf-8') as f:
+        try:
+            config = json.load(f)
+        except Exception:
+            return JSONResponse(content={"error": "Invalid JSON in trading_config.json"}, status_code=500)
+    return config
