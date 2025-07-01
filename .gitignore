@@ -8,3 +8,6 @@ wheels/
 utils/test.py
 # Virtual environments
 .venv
+telegram_bot/chat_messages.json
+telegram_bot/payments.json
+telegram_bot/telegram_chat.log
