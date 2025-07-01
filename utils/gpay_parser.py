@@ -21,12 +21,12 @@ def parse_gpay_payment_from_image(image_path):
 
     json_formatter = """
     {
-      "amount": "", // string: The transaction amount with currency symbol (e.g., "₹707")
+      "amount": "", // string: The transaction amount without currency symbol (e.g., 707) should be integer
       "date": "", // string: Transaction date in "DD MMM YYYY" format (e.g., "28 Jun 2025")
       "time": "", // string: Time of transaction in 12-hour format with AM/PM (e.g., "12:12 AM")
       "from": "", // string: Sender's name and UPI ID (e.g., "Name (Bank) - UPI ID")
       "to": "", // string: Recipient's name and UPI ID (e.g., "Name - UPI ID")
-      "message": "", // string: Message or purpose associated with the transaction
+      "message": "", // string: Message is a code which is in a grey box and that should be extracted (e.g., "EEREXXX")
       "upi_transaction_id": "", // string: Unique identifier for the UPI transaction
       "google_transaction_id": "" // string: Unique identifier assigned by Google Pay
     }
@@ -41,7 +41,7 @@ def parse_gpay_payment_from_image(image_path):
                     {
                         "type": "text",
                         "text": f"""You are a payment parser. Extract the payment details from the image below and provide ONLY the following JSON data:
-                        - amount: The transaction amount with currency symbol (e.g., "₹707")
+                        - amount: The transaction amount with currency symbol (e.g., 707) should not have currency symbol and should not have string quotes
                         - date: Transaction date in "DD MMM YYYY" format (e.g., "28 Jun 2025")
                         - time: Time of transaction in 12-hour format with AM/PM (e.g., "12:12 AM")
                         - from: Sender's name and UPI ID (e.g., "Name (Bank) - UPI ID")
@@ -100,7 +100,7 @@ def generate_upi_qr(payee_vpa, message, amount, filename="upi_qr_code.png"):
     qr.show()
 
 # Example usage:
-generate_upi_qr("shashikalaaithal97-1@okaxis", "EEREXXX", "1")
+# generate_upi_qr("shashikalaaithal97-1@okaxis", "EEREXXX", "1")
 
 
 # response_json = parse_gpay_payment_from_image("C:\\D-drive\\binance_trading_bot\\payments\\image.png")
