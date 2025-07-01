@@ -18,7 +18,7 @@ chat_logger.setLevel(logging.INFO)
 
 # No need to create logs directory since we're storing everything in telegram_bot folder
 
-# No need to explicitly create telegram_bot directory since we're already in it
+# No need to explicitly create telegram_bot directory as it already exists
 # and using os.path.dirname(__file__) for the file path
 
 # Create a file handler for the chat log
@@ -242,7 +242,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔔 *Notifications:*\n"
         "🔔 /notify - Enable notifications\n"
         "🔕 /stop\\_notify - Disable notifications\n\n"
-        " /total\\_messages - View message stats\n\n"
+        "📊 /total\\_messages - View message stats\n"
+        "💰 /payments - View payment details\n\n"
         "📝 *Settings Format:*\n"
         "`interval,symbol,quantity,buy_offset,sell_offset`\n"
         "Example: `1m,BTCUSDT,0.01,10,10`\n\n"
@@ -279,8 +280,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔔 *Notifications:*\n"
         "🔔 /notify - Enable order fill notifications\n"
         "🔕 /stop\\_notify - Disable notifications\n\n"
-        "� *Message Statistics:*\n"
-        "📊 /total\\_messages - View message count statistics\n\n"
+        "📊 *Statistics & Info:*\n"
+        "📊 /total\\_messages - View message count statistics\n"
+        "💰 /payments - View payment details\n\n"
         "📝 *Settings Format:*\n"
         "`candle_interval,symbol,quantity,buy_offset,sell_offset`\n"
         "Example: `1m,BTCUSDT,0.01,10,10`"
@@ -573,6 +575,59 @@ async def total_messages_command(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(response_message, parse_mode='Markdown')
     log_message("SENT", update.effective_chat.id, "", "private", response_message)
 
+async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /payments command to show payment details"""
+    # Log the command
+    chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/payments")
+    
+    # Read payment details from JSON file
+    try:
+        payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
+        
+        if not os.path.exists(payments_file) or os.path.getsize(payments_file) == 0:
+            response_message = "❌ Payment information is not available."
+        else:
+            with open(payments_file, 'r', encoding='utf-8') as f:
+                payment_data = json.load(f)
+                
+            # Extract payment details
+            server_cost = payment_data.get("server_cost", 0)
+            server_commission = payment_data.get("server_commission", 0)
+            per_message_cost = payment_data.get("per_message_cost", 0)
+            message_monthly_cost = payment_data.get("message_monthly_cost", 0)
+            support_cost = payment_data.get("support_cost", 0)
+            
+            # Calculate total server cost (including commission)
+            total_server_cost = server_cost + server_commission
+            
+            # Calculate total fixed cost (server + monthly message + support)
+            total_fixed_cost = total_server_cost + message_monthly_cost + support_cost
+            
+            # Format response with emojis
+            response_message = (
+                "💰 *Payment Details* 💰\n\n"
+                f"🖥️ *Server Costs*\n"
+                f"  • Server Cost: ₹{total_server_cost:.2f}\n\n"
+                f"📱 *Messaging*\n"
+                f"  • Per Message Fee: ₹{per_message_cost:.2f}/message\n"
+                f"  • Monthly Message Plan: ₹{message_monthly_cost:.2f}/month\n\n"
+                f"👨‍💻 *Support*\n"
+                f"  • Support Cost: ₹{support_cost:.2f}\n\n"
+                f"💵 *Summary*\n"
+                f"  • Total Fixed Monthly Costs: ₹{total_fixed_cost:.2f}\n"
+                f"  • Additional Per-Message Fees: ₹{per_message_cost:.2f} per message\n\n"
+                f"ℹ️ Per-message fees are charged based on actual usage beyond the monthly plan."
+            )
+    except Exception as e:
+        print(f"❌ Error retrieving payment information: {e}")
+        response_message = f"❌ Error retrieving payment information: {str(e)}"
+    
+    await update.message.reply_text(response_message, parse_mode='Markdown')
+    log_message("SENT", update.effective_chat.id, "", "private", response_message)
+
 def main():
     """Start the bot"""
     if not BOT_TOKEN:
@@ -590,7 +645,7 @@ def main():
     print("=" * 50)
     print("💡 Available Commands:")
     print("   /start, /help, /start_bot, /stop_bot, /status")
-    print("   /settings, /notify, /stop_notify, /total_messages")
+    print("   /settings, /notify, /stop_notify, /total_messages, /payments")
     print("=" * 50)
     
     # Create the Application with timeouts
@@ -606,6 +661,7 @@ def main():
     application.add_handler(CommandHandler("notify", notify_command))
     application.add_handler(CommandHandler("stop_notify", stop_notify_command))
     application.add_handler(CommandHandler("total_messages", total_messages_command))
+    application.add_handler(CommandHandler("payments", payments_command))
     
     # Add message handler for non-command messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
