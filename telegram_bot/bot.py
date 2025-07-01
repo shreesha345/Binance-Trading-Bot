@@ -9,8 +9,79 @@ from typing import Dict, Any
 import logging
 import tempfile
 import re
+import json
+from datetime import datetime
+
+# Create a dedicated logger for chat messages
+chat_logger = logging.getLogger('chat_messages')
+chat_logger.setLevel(logging.INFO)
+
+# No need to create logs directory since we're storing everything in telegram_bot folder
+
+# No need to explicitly create telegram_bot directory since we're already in it
+# and using os.path.dirname(__file__) for the file path
+
+# Create a file handler for the chat log
+chat_log_file = os.path.join(os.path.dirname(__file__), 'telegram_chat.log')
+chat_file_handler = logging.FileHandler(chat_log_file)
+chat_file_handler.setLevel(logging.INFO)
+
+# Create a formatter for the chat logs
+chat_formatter = logging.Formatter('%(asctime)s - %(message)s')
+chat_file_handler.setFormatter(chat_formatter)
+
+# Add the handler to the logger
+chat_logger.addHandler(chat_file_handler)
+
+def log_message(message_type, chat_id, username, chat_type, message_text):
+    """Log sent and received messages to a dedicated log file and JSON storage"""
+    try:
+        # Create timestamp with date and time
+        timestamp = datetime.now().isoformat()
+        
+        # Prepare log entry
+        log_data = {
+            "timestamp": timestamp,
+            "date": timestamp.split("T")[0],
+            "time": timestamp.split("T")[1].split(".")[0],
+            "type": message_type,  # "RECEIVED" or "SENT"
+            "chat_id": chat_id,
+            "username": username,
+            "chat_type": chat_type,  # "private", "group", "supergroup", etc.
+            "message": message_text
+        }
+        
+        # Log to regular log file
+        chat_logger.info(json.dumps(log_data))
+        
+        # Also store in JSON file
+        json_log_file = os.path.join(os.path.dirname(__file__), 'chat_messages.json')  # Store in telegram_bot folder
+        
+        # Load existing messages or create new structure
+        try:
+            if os.path.exists(json_log_file) and os.path.getsize(json_log_file) > 0:
+                with open(json_log_file, 'r', encoding='utf-8') as f:
+                    chat_history = json.load(f)
+            else:
+                chat_history = {"messages": []}
+        except json.JSONDecodeError:
+            # If the file is corrupted, start fresh
+            chat_history = {"messages": []}
+            
+        # Add new message to history
+        chat_history["messages"].append(log_data)
+        
+        # Save updated history
+        with open(json_log_file, 'w', encoding='utf-8') as f:
+            json.dump(chat_history, f, indent=2, ensure_ascii=False)
+            
+        print(f"✅ Logged {message_type} message for chat_id: {chat_id}")
+    except Exception as e:
+        print(f"❌ Error logging message: {e}")
 
 try:
+    # Import the interface to communicate with the main trading bot
+    # This maintains separation between telegram_bot and trading functionality
     import server_call
     SERVER_CALL_AVAILABLE = True
     print("✅ server_call module imported successfully")
@@ -92,6 +163,7 @@ async def send_telegram_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int
             connect_timeout=30
         )
         print(f"✅ Message sent successfully to chat_id: {chat_id}")
+        log_message("SENT", chat_id, "", "private", message)  # Log sent message
         return True
     except Exception as e:
         print(f"❌ Error sending Telegram message: {e}")
@@ -107,6 +179,7 @@ async def send_telegram_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int
                 connect_timeout=30
             )
             print(f"✅ Fallback message sent to chat_id: {chat_id}")
+            log_message("SENT", chat_id, "", "private", message)  # Log sent message
             return True
         except Exception as fallback_error:
             print(f"❌ Fallback also failed: {fallback_error}")
@@ -153,6 +226,12 @@ def poll_filled_orders_sync(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command - same as help"""
+    # Log the command
+    chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/start")
+    
     help_message = (
         "🎉 *Welcome to Trading Bot!*\n\n"
         "🤖 *Trading Commands:*\n"
@@ -163,6 +242,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔔 *Notifications:*\n"
         "🔔 /notify - Enable notifications\n"
         "🔕 /stop\\_notify - Disable notifications\n\n"
+        " /total\\_messages - View message stats\n\n"
         "📝 *Settings Format:*\n"
         "`interval,symbol,quantity,buy_offset,sell_offset`\n"
         "Example: `1m,BTCUSDT,0.01,10,10`\n\n"
@@ -172,6 +252,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_text(help_message, parse_mode='Markdown')
         print(f"✅ /start command sent successfully to {update.effective_chat.id}")
+        log_message("SENT", update.effective_chat.id, "", "private", help_message)  # Log sent message
     except Exception as e:
         print(f"❌ Error sending /start response: {e}")
         # Fallback to plain text
@@ -182,21 +263,24 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command - complete command list"""
+    # Log the command
+    chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/help")
+    
     help_message = (
         "📖 *Complete Command List:*\n\n"
         "🤖 *Trading:*\n"
         "🚀 /start\\_bot - Start the trading bot\n"
         "🛑 /stop\\_bot - Stop the trading bot\n"
         "📊 /status - Check current bot status\n"
-        "⚙️ /settings - Update trading configuration\n"
-        "📈 /orderbook - Get current order book\n"
-        "📊 /history - Get historical order book\n\n"
+        "⚙️ /settings - Update trading configuration\n\n"
         "🔔 *Notifications:*\n"
         "🔔 /notify - Enable order fill notifications\n"
         "🔕 /stop\\_notify - Disable notifications\n\n"
-        "💰 *Payment:*\n"
-        "💳 /generate\\_qr - Generate UPI payment QR\n"
-        "🔍 /scan\\_photo - Scan payment screenshot\n\n"
+        "� *Message Statistics:*\n"
+        "📊 /total\\_messages - View message count statistics\n\n"
         "📝 *Settings Format:*\n"
         "`candle_interval,symbol,quantity,buy_offset,sell_offset`\n"
         "Example: `1m,BTCUSDT,0.01,10,10`"
@@ -205,6 +289,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_text(help_message, parse_mode='Markdown')
         print(f"✅ /help command sent successfully to {update.effective_chat.id}")
+        log_message("SENT", update.effective_chat.id, "", "private", help_message)  # Log sent message
     except Exception as e:
         print(f"❌ Error sending /help response: {e}")
         # Fallback to plain text
@@ -215,6 +300,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_bot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start_bot command"""
+    # Log the command
+    chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/start_bot")
+    
     if not SERVER_CALL_AVAILABLE:
         response_message = "❌ Trading bot service is not available. Please check server connection."
     else:
@@ -226,10 +317,16 @@ async def start_bot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response_message = f"❌ Error starting bot: {str(e)}"
     
     await update.message.reply_text(response_message, parse_mode='Markdown')
+    log_message("SENT", update.effective_chat.id, "", "private", response_message)  # Log sent message
 
 async def stop_bot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stop_bot command"""
+    # Log the command
     chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/stop_bot")
+    
     if not SERVER_CALL_AVAILABLE:
         response_message = "❌ Trading bot service is not available. Please check server connection."
     else:
@@ -243,9 +340,16 @@ async def stop_bot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if notify_users.get(chat_id, {}).get("notifying", False):
         notify_users[chat_id]["notifying"] = False
     await update.message.reply_text(response_message, parse_mode='Markdown')
+    log_message("SENT", update.effective_chat.id, "", "private", response_message)  # Log sent message
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command"""
+    # Log the command
+    chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/status")
+    
     if not SERVER_CALL_AVAILABLE:
         response_message = "❌ Trading bot service is not available. Please check server connection."
     else:
@@ -259,10 +363,15 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response_message = f"❌ Error getting bot status: {str(e)}"
     
     await update.message.reply_text(response_message, parse_mode='Markdown')
+    log_message("SENT", update.effective_chat.id, "", "private", response_message)  # Log sent message
 
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /settings command"""
+    # Log the command
     chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/settings")
 
     response_message = (
         "⚙️ *Trading Settings Configuration*\n\n"
@@ -284,10 +393,15 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     notify_users[chat_id]["awaiting_settings"] = True
 
     await update.message.reply_text(response_message, parse_mode='Markdown')
+    log_message("SENT", update.effective_chat.id, "", "private", response_message)  # Log sent message
 
 async def notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /notify command"""
+    # Log the command
     chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/notify")
     
     if not SERVER_CALL_AVAILABLE:
         response_message = "❌ Trading bot service is not available. Notifications cannot be enabled."
@@ -309,10 +423,15 @@ async def notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response_message = "🔔 *Already Enabled*\nNotifications are already active for your account."
     
     await update.message.reply_text(response_message, parse_mode='Markdown')
+    log_message("SENT", update.effective_chat.id, "", "private", response_message)  # Log sent message
 
 async def stop_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stop_notify command"""
+    # Log the command
     chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/stop_notify")
     
     if notify_users.get(chat_id, {}).get("notifying", False):
         notify_users[chat_id]["notifying"] = False
@@ -321,6 +440,7 @@ async def stop_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         response_message = "🔕 *Already Disabled*\nNotifications were not enabled for your account."
     
     await update.message.reply_text(response_message, parse_mode='Markdown')
+    log_message("SENT", update.effective_chat.id, "", "private", response_message)  # Log sent message
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle non-command messages"""
@@ -328,6 +448,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = update.message.text.strip()
 
     print(f"📥 Received message: '{message_text}' from chat_id: {chat_id}")
+    log_message("RECEIVED", chat_id, update.message.from_user.username, "private", message_text)  # Log received message
 
     # Check if user is awaiting settings input
     if notify_users.get(chat_id, {}).get("awaiting_settings", False):
@@ -390,10 +511,67 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     await update.message.reply_text(response_message, parse_mode='Markdown')
+    log_message("SENT", update.effective_chat.id, "", "private", response_message)  # Log sent message
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle errors"""
     logger.warning(f'Update {update} caused error {context.error}')
+
+async def total_messages_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /total_messages command to show message counts"""
+    # Log the command
+    chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/total_messages")
+    
+    # Read message history directly from JSON file
+    try:
+        json_log_file = os.path.join(os.path.dirname(__file__), 'chat_messages.json')  # Read from telegram_bot folder
+        
+        if not os.path.exists(json_log_file) or os.path.getsize(json_log_file) == 0:
+            messages = []
+        else:
+            with open(json_log_file, 'r', encoding='utf-8') as f:
+                chat_history = json.load(f)
+                messages = chat_history.get("messages", [])
+                
+            # Filter by chat_id
+            messages = [msg for msg in messages if str(msg.get("chat_id")) == str(chat_id)]
+    except Exception as e:
+        print(f"❌ Error retrieving chat history: {e}")
+        messages = []
+    
+    # Count messages
+    total_messages = len(messages)
+    total_sent = sum(1 for msg in messages if msg.get("type") == "SENT")
+    total_received = sum(1 for msg in messages if msg.get("type") == "RECEIVED")
+    
+    # Get date of first and last message
+    first_message_date = "N/A"
+    last_message_date = "N/A"
+    
+    if messages:
+        try:
+            first_msg = messages[0]
+            first_message_date = f"{first_msg.get('date', 'N/A')} {first_msg.get('time', '')}"
+            
+            last_msg = messages[-1]
+            last_message_date = f"{last_msg.get('date', 'N/A')} {last_msg.get('time', '')}"
+        except (IndexError, KeyError):
+            pass
+    
+    response_message = (
+        "📊 *Message Statistics Summary*\n\n"
+        f"*Total Messages:* {total_messages}\n"
+        f"*Messages Sent:* {total_sent}\n"
+        f"*Messages Received:* {total_received}\n\n"
+        f"*First Message:* {first_message_date}\n"
+        f"*Latest Message:* {last_message_date}"
+    )
+    
+    await update.message.reply_text(response_message, parse_mode='Markdown')
+    log_message("SENT", update.effective_chat.id, "", "private", response_message)
 
 def main():
     """Start the bot"""
@@ -407,9 +585,12 @@ def main():
     print(f"🤖 Bot Token: {'✅ Set' if BOT_TOKEN else '❌ Missing'}")
     print(f"🔧 Server Call: {'✅ Available' if SERVER_CALL_AVAILABLE else '❌ Not Available'}")
     print("=" * 50)
+    print("💡 All files and logs are stored in telegram_bot folder")
+    print("💡 This bot communicates with the trading bot via the server_call interface")
+    print("=" * 50)
     print("💡 Available Commands:")
     print("   /start, /help, /start_bot, /stop_bot, /status")
-    print("   /settings, /notify, /stop_notify")
+    print("   /settings, /notify, /stop_notify, /total_messages")
     print("=" * 50)
     
     # Create the Application with timeouts
@@ -424,6 +605,7 @@ def main():
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("notify", notify_command))
     application.add_handler(CommandHandler("stop_notify", stop_notify_command))
+    application.add_handler(CommandHandler("total_messages", total_messages_command))
     
     # Add message handler for non-command messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
