@@ -12,3 +12,6 @@ telegram_bot/chat_messages.json
 telegram_bot/payments.json
 telegram_bot/telegram_chat.log
 telegram_bot/payment_cycle.json
+telegram_bot/qr_codes
+telegram_bot/temp_screenshots
+telegram_bot/temp
