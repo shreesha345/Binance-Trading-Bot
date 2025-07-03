@@ -79,7 +79,6 @@ def get_qrcode(amount: int, message: str, save_path=None):
     """
     if save_path is None:
         # Use the default path in telegram_bot/qr_codes
-        import os
         qr_dir = os.path.join(os.path.dirname(__file__), 'qr_codes')
         os.makedirs(qr_dir, exist_ok=True)
         save_path = os.path.join(qr_dir, "upi_qr_code.png")
