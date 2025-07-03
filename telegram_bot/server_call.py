@@ -68,10 +68,21 @@ def get_current_order_book():
     else:
         raise Exception(f"Failed to get order book snapshot: {response.text}")
 
-def get_qrcode(amount: int, message: str, save_path="whatsappBot/upi_qr_code.png"):
+def get_qrcode(amount: int, message: str, save_path=None):
     """
     Get QR code for the bot, decode base64 from API, and save it as an image file.
+    
+    Args:
+        amount: Payment amount
+        message: Payment reference code
+        save_path: Path to save QR code image (defaults to telegram_bot/qr_codes/upi_qr_code.png if None)
     """
+    if save_path is None:
+        # Use the default path in telegram_bot/qr_codes
+        import os
+        qr_dir = os.path.join(os.path.dirname(__file__), 'qr_codes')
+        os.makedirs(qr_dir, exist_ok=True)
+        save_path = os.path.join(qr_dir, "upi_qr_code.png")
     payee = os.getenv("Payment_NAME_ID")
     url = f"{base_url}/gpay/generate_qr"
     response = requests.get(url, params={
