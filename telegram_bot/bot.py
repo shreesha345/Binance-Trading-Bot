@@ -34,6 +34,7 @@ help_message = (
         "Example: `1m,BTCUSDT,0.01,10,10`\n\n"
         "⚠️ *Payment System:*\n"
         "• Payment is due on the specified due date\n"
+        "• Payments can only be made on or after the due date\n"
         "• You have 1 extra day after the due date to make payment\n" 
         "• If payment is not made, only /help, /payments, /payment\\_made, /total\\_messages, and /cancel\\_payment will work\n"
         "• All other commands will be blocked until payment is made"
@@ -278,6 +279,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Example: `1m,BTCUSDT,0.01,10,10`\n\n"
         "⚠️ *Payment System:*\n"
         "• Payment is due on the specified due date\n"
+        "• Payments can only be made on or after the due date\n"
         "• You have 1 extra day after due date to pay\n" 
         "• If payment is overdue, most commands are blocked\n\n"
         "❓ /help - Full command list"
@@ -323,6 +325,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Example: `1m,BTCUSDT,0.01,10,10`\n\n"
         "⚠️ *Payment System:*\n"
         "• Payment is due on the specified due date\n"
+        "• Payments can only be made on or after the due date\n"
         "• You have 1 extra day after the due date to make payment\n" 
         "• If payment is not made, only /help, /payments, /payment\\_made, /total\\_messages, and /cancel\\_payment will work\n"
         "• All other commands will be blocked until payment is made"
@@ -560,12 +563,41 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.warning(f'Update {update} caused error {context.error}')
 
 async def total_messages_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /total_messages command to show message counts"""
+    """Handle /total_messages command to show message counts with optional date range filtering"""
     # Log the command
     chat_id = update.effective_chat.id
     username = update.effective_user.username if update.effective_user else "unknown"
     chat_type = update.effective_chat.type if update.effective_chat else "private"
-    log_message("RECEIVED", chat_id, username, chat_type, "/total_messages")
+    command_text = update.message.text if update.message else "/total_messages"
+    log_message("RECEIVED", chat_id, username, chat_type, command_text)
+    
+    # Parse date range arguments
+    start_date = None
+    end_date = None
+    date_range_str = ""
+    
+    if context.args:
+        try:
+            # Parse start date
+            if len(context.args) >= 1:
+                start_date = datetime.strptime(context.args[0], '%Y-%m-%d').date()
+                date_range_str = f" for {start_date.strftime('%Y-%m-%d')}"
+            
+            # Parse end date if provided
+            if len(context.args) >= 2:
+                end_date = datetime.strptime(context.args[1], '%Y-%m-%d').date()
+                date_range_str = f" from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+            else:
+                # If only start date is provided, use it as both start and end
+                end_date = start_date
+                
+        except ValueError:
+            await update.message.reply_text(
+                "⚠️ *Invalid date format*\n\nPlease use YYYY-MM-DD format.\n\n*Examples:*\n• `/total_messages 2025-07-03` - Show messages for July 3rd\n• `/total_messages 2025-07-01 2025-07-31` - Show messages for July",
+                parse_mode='Markdown'
+            )
+            log_message("SENT", chat_id, "", "private", "Invalid date format error")
+            return
     
     # Read message history directly from JSON file
     try:
@@ -580,6 +612,20 @@ async def total_messages_command(update: Update, context: ContextTypes.DEFAULT_T
                 
             # Filter by chat_id
             messages = [msg for msg in messages if str(msg.get("chat_id")) == str(chat_id)]
+            
+            # Filter by date range if provided
+            if start_date and end_date:
+                filtered_messages = []
+                for msg in messages:
+                    try:
+                        msg_date = datetime.strptime(msg.get("date", "1970-01-01"), '%Y-%m-%d').date()
+                        if start_date <= msg_date <= end_date:
+                            filtered_messages.append(msg)
+                    except (ValueError, TypeError):
+                        # Skip messages with invalid date format
+                        continue
+                messages = filtered_messages
+                
     except Exception as e:
         print(f"❌ Error retrieving chat history: {e}")
         messages = []
@@ -589,7 +635,7 @@ async def total_messages_command(update: Update, context: ContextTypes.DEFAULT_T
     total_sent = sum(1 for msg in messages if msg.get("type") == "SENT")
     total_received = sum(1 for msg in messages if msg.get("type") == "RECEIVED")
     
-    # Get date of first and last message
+    # Get date of first and last message in the filtered set
     first_message_date = "N/A"
     last_message_date = "N/A"
     
@@ -603,13 +649,18 @@ async def total_messages_command(update: Update, context: ContextTypes.DEFAULT_T
         except (IndexError, KeyError):
             pass
     
+    # Create response message with date range if specified
     response_message = (
-        "📊 *Message Statistics Summary*\n\n"
+        f"📊 *Message Statistics{date_range_str}*\n\n"
         f"*Total Messages:* {total_messages}\n"
         f"*Messages Sent:* {total_sent}\n"
         f"*Messages Received:* {total_received}\n\n"
         f"*First Message:* {first_message_date}\n"
-        f"*Latest Message:* {last_message_date}"
+        f"*Latest Message:* {last_message_date}\n\n"
+        "*Usage:*\n"
+        "• `/total_messages` - Show all messages\n"
+        "• `/total_messages YYYY-MM-DD` - Show messages for specific date\n"
+        "• `/total_messages YYYY-MM-DD YYYY-MM-DD` - Show messages in date range"
     )
     
     await update.message.reply_text(response_message, parse_mode='Markdown')
@@ -901,18 +952,20 @@ async def payment_made_command(update: Update, context: ContextTypes.DEFAULT_TYP
         due_date_only = due_date_dt.replace(hour=0, minute=0, second=0, microsecond=0).date()
         due_date_display = due_date_dt.strftime("%Y-%m-%d")
         
-        # Instead of blocking payment, just show payment status for information
+        # Check if payment is allowed based on date
         if today_date < due_date_only:
-            # Payment is being made early - just an informational message
+            # Payment is being made early - block payment
             info_message = (
-                f"ℹ️ *Payment Information*\n\n"
-                f"Your payment is not yet due. The scheduled due date is: {due_date_display}\n\n"
-                f"You can still make an early payment, which will be applied to your account."
+                f"❌ *Payment Not Allowed*\n\n"
+                f"You cannot make payments before the due date.\n"
+                f"The scheduled due date is: {due_date_display}\n\n"
+                f"Please wait until the due date to make your payment."
             )
             await update.message.reply_text(info_message, parse_mode='Markdown')
             log_message("SENT", update.effective_chat.id, "", "private", info_message)
+            return  # Exit the function to prevent payment
         elif today_date > due_date_only + timedelta(days=1):
-            # Payment is overdue - informational message but still allow payment
+            # Payment is overdue - informational message and allow payment
             info_message = (
                 f"ℹ️ *Payment Information*\n\n"
                 f"Your payment is currently overdue. The due date was: {due_date_display}\n\n"
@@ -1434,13 +1487,22 @@ def calculate_next_bill_date(start_date, cycle_days):
     
     return next_bill_date
 
-def can_make_payment(last_payment_date, next_bill_date):
+def can_make_payment(last_payment_date, due_date):
     """Check if payment can be made
-    Always returns True - payments are allowed at any time
-    When payment is made, the next billing cycle is calculated from the original due date
+    Payments are only allowed on or after the due date
+    Returns True if payment is allowed, False otherwise
     """
-    # Always allow payments regardless of the date
-    return True
+    # Get current date in IST
+    today = get_ist_now()
+    today_date = today.replace(hour=0, minute=0, second=0, microsecond=0).date()
+    
+    # Convert due date to date object for comparison
+    if isinstance(due_date, str):
+        due_date = string_to_ist(due_date)
+    due_date_only = due_date.replace(hour=0, minute=0, second=0, microsecond=0).date()
+    
+    # Payment is allowed only on or after the due date
+    return today_date >= due_date_only
 
 def get_payment_status_info():
     """Get current payment status and info message"""
@@ -1658,10 +1720,6 @@ def main():
     # Initialize or create temp directory for payment screenshots
     temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
     os.makedirs(temp_dir, exist_ok=True)
-    
-    # Initialize or create whatsappBot directory for QR codes
-    whatsapp_dir = "whatsappBot"
-    os.makedirs(whatsapp_dir, exist_ok=True)
     
     print("=" * 50)
     print("🚀 Starting Telegram Trading Bot")
