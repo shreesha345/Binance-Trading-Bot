@@ -15,8 +15,9 @@ from utils.bot_state import (
     get_candle_order_created_at, set_candle_order_created_at
 )
 from utils.config import (
-    QUANTITY, BUY_OFFSET, SELL_OFFSET
+    FIXED_QUANTITY, QUANTITY_TYPE, QUANTITY_PERCENTAGE, BUY_OFFSET, SELL_OFFSET
 )
+from utils.quantity_calculator import calculate_quantity
 from rich import print as rich_print
 from rich.pretty import Pretty
 from utils.logger import log_websocket, log_error
@@ -137,9 +138,9 @@ def handle_filled_buy_order(row_data, symbol, order_details, filled_price):
     row_data["stop_loss"] = stop_trigger_price
     
     # Get the actual filled quantity from the order details
-    filled_quantity = float(order_details.get('executedQty', QUANTITY))
+    filled_quantity = float(order_details.get('executedQty', calculate_quantity(FIXED_QUANTITY, QUANTITY_PERCENTAGE, QUANTITY_TYPE)))
     if filled_quantity <= 0:
-        filled_quantity = QUANTITY  # Fallback to configured quantity
+        filled_quantity = calculate_quantity(FIXED_QUANTITY, QUANTITY_PERCENTAGE, QUANTITY_TYPE)  # Fallback to configured quantity
     
     log_message(f"[STRATEGY] Creating initial stop loss after buy fill with trigger at: {stop_trigger_price}")
     sell_order = sell_long(symbol, price=stop_trigger_price, stop_limit=stop_trigger_price, quantity=filled_quantity)
@@ -277,7 +278,7 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
             # Only place stop order if current price is below stop_limit
             if current_price < buy_stop_limit:
                 log_message(f"[STRATEGY] Creating buy order for next candle: {symbol} at price: {buy_price} (HA_High + {BUY_OFFSET}), stop_limit: {buy_stop_limit} (HA_High)")
-                buy_order = buy_long(symbol, price=buy_price, stop_limit=buy_stop_limit, quantity=QUANTITY)
+                buy_order = buy_long(symbol, price=buy_price, stop_limit=buy_stop_limit, quantity=calculate_quantity(FIXED_QUANTITY, QUANTITY_PERCENTAGE, QUANTITY_TYPE))
                 if buy_order:
                     set_active_buy_order(buy_order)
                     set_candle_order_created_at(row_data["timestamp"])
@@ -289,7 +290,7 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
             log_error(f"Error checking market price before placing order: {e}", exc_info=True)
             # Fallback - try placing the order anyway
             log_message(f"[STRATEGY] Creating buy order for next candle (fallback): {symbol} at price: {buy_price}, stop_limit: {buy_stop_limit}")
-            buy_order = buy_long(symbol, price=buy_price, stop_limit=buy_stop_limit, quantity=QUANTITY)
+            buy_order = buy_long(symbol, price=buy_price, stop_limit=buy_stop_limit, quantity=calculate_quantity(FIXED_QUANTITY, QUANTITY_PERCENTAGE, QUANTITY_TYPE))
             if buy_order:
                 set_active_buy_order(buy_order)
                 set_candle_order_created_at(row_data["timestamp"])
