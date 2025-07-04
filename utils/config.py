@@ -62,7 +62,10 @@ TRADING_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), '
 with open(TRADING_CONFIG_PATH, 'r') as f:
     trading_config = json.load(f)
 
-QUANTITY = float(trading_config.get('quantity', os.getenv('QUANTITY', '0.01')))
+# Config values from trading_config.json
+QUANTITY_TYPE = trading_config.get('quantity_type', 'fixed')
+FIXED_QUANTITY = float(trading_config.get('quantity', os.getenv('QUANTITY', '0.01')))
+QUANTITY_PERCENTAGE = float(trading_config.get('quantity_percentage', '10'))
 TRADING_SYMBOL = trading_config.get('symbol_name')
 SELL_OFFSET = float(trading_config.get('sell_long_offset', 0))
 BUY_OFFSET = float(trading_config.get('buy_long_offset', 0))
