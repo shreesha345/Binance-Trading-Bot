@@ -93,13 +93,17 @@ def enrich_order_details(order_details: Dict[str, Any],
     Returns:
         Enriched order details
     """
+    # Import here to avoid circular imports
+    from utils.config import CANDLE_INTERVAL
+    
     enriched = order_details.copy()
     
     # Add metadata
     enriched['meta'] = {
         'order_type': order_type,
         'position_side': position_side,
-        'recorded_at': datetime.datetime.now().isoformat()
+        'recorded_at': datetime.datetime.now().isoformat(),
+        'time_interval': CANDLE_INTERVAL  # Add the candle interval information
     }
     
     # Add filled price if provided
