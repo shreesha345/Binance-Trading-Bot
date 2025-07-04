@@ -127,6 +127,8 @@ def update_trading_config(
     sell_long_offset=None,
     buy_long_offset=None,
     quantity=None,
+    quantity_type=None,
+    quantity_percentage=None,
     candle_interval=None
 ):
     """
@@ -150,14 +152,29 @@ def update_trading_config(
         payload["buy_long_offset"] = buy_long_offset
     if quantity is not None:
         payload["quantity"] = quantity
+    if quantity_type is not None:
+        payload["quantity_type"] = quantity_type
+    if quantity_percentage is not None:
+        payload["quantity_percentage"] = quantity_percentage
     if candle_interval is not None:
         payload["candle_interval"] = candle_interval
 
-    response = requests.post(url, json=payload)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        raise Exception(f"Failed to update trading config: {response.text}")
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            error_message = f"Failed to update trading config: {response.text}"
+            print(f"ERROR: {error_message}")
+            raise Exception(error_message)
+    except requests.exceptions.ConnectionError as e:
+        error_message = f"Connection error while updating trading config: {str(e)}"
+        print(f"ERROR: {error_message}")
+        raise Exception(error_message)
+    except Exception as e:
+        error_message = f"Unexpected error while updating trading config: {str(e)}"
+        print(f"ERROR: {error_message}")
+        raise Exception(error_message)
 
 def get_latest_update():
     """
