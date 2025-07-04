@@ -155,6 +155,8 @@ class TradingConfigUpdateRequest(BaseModel):
     sell_long_offset: Any = Field(default=None)
     buy_long_offset: Any = Field(default=None)
     quantity: Any = Field(default=None)
+    quantity_type: Any = Field(default=None)
+    quantity_percentage: Any = Field(default=None)
     candle_interval: Any = Field(default=None)
 
 @router.post("/trading_config/update")
@@ -164,18 +166,31 @@ def update_trading_config(req: TradingConfigUpdateRequest):
     """
     config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api', 'trading_config.json')
     if not os.path.exists(config_path):
+        log_api(f"Error: trading_config.json not found at {config_path}")
         return JSONResponse(content={"error": "trading_config.json not found"}, status_code=404)
+    
     with open(config_path, 'r', encoding='utf-8') as f:
         try:
             config = json.load(f)
-        except Exception:
+        except Exception as e:
+            log_api(f"Error parsing trading_config.json: {str(e)}")
             return JSONResponse(content={"error": "Invalid JSON in trading_config.json"}, status_code=500)
+    
     update_data = req.dict(exclude_unset=True)
+    
+    # Log the received update data
+    log_api(f"Updating trading config with: {update_data}")
+    
+    # Apply updates
     for k, v in update_data.items():
         if v is not None:
             config[k] = v
+    
+    # Write the updated config back to the file
     with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=4)
+    
+    log_api(f"Trading config updated successfully")
     return {"status": "success", "updated_config": config}
 
 @router.get("/trading_config")
