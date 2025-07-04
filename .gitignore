@@ -15,3 +15,7 @@ telegram_bot/payment_cycle.json
 telegram_bot/qr_codes
 telegram_bot/temp_screenshots
 telegram_bot/temp
+telegram_bot/payment_links.json
+telegram_bot/customer_details.json
+data/order_book.json
+logs/
