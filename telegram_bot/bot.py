@@ -424,10 +424,13 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`candle_interval,symbol,quantity,buy_long_offset,sell_long_offset`\n\n"
         "📝 Example:\n"
         "`1m,BTCUSDT,0.01,10,10`\n\n"
+        "📊 *Percentage-Based Trading:*\n"
+        "Add % to quantity for percentage of balance (e.g., `5%` to use 5% of available balance)\n"
+        "`1m,BTCUSDT,5%,10,10`\n\n"
         "Where:\n"
         "• Candle Interval: e.g., 1m, 5m, 1h\n"
         "• Symbol: Trading pair (e.g., BTCUSDT)\n"
-        "• Quantity: Trade amount\n"
+        "• Quantity: Trade amount (fixed or percentage with %)\n"
         "• Buy offset: Price offset for buy orders\n"
         "• Sell offset: Price offset for sell orders"
     )
@@ -507,21 +510,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     raise ValueError("Please provide exactly 5 values: candle_interval,symbol,quantity,buy_long_offset,sell_long_offset")
 
                 candle_interval, symbol, quantity, buy_long_offset, sell_long_offset = parts
-
-                # Use update_trading_config to add the data
+                
+                # Check if quantity is percentage-based (ends with %)
+                quantity_type = "fixed"
+                quantity_percentage = "10"  # Default value
+                if quantity.endswith('%'):
+                    quantity_type = "percentage"
+                    quantity_percentage = quantity.rstrip('%')
+                    quantity = "1"  # Set a default fallback value for fixed quantity
+                
+                # Use update_trading_config to add all the data in a single API call
                 result = server_call.update_trading_config(
                     candle_interval=candle_interval,
                     symbol_name=symbol,
                     quantity=quantity,
                     buy_long_offset=buy_long_offset,
-                    sell_long_offset=sell_long_offset
+                    sell_long_offset=sell_long_offset,
+                    quantity_type=quantity_type,
+                    quantity_percentage=quantity_percentage
                 )
+                
+                # Set display value based on quantity type
+                quantity_display = f"{quantity_percentage}% of balance" if quantity_type == "percentage" else quantity
 
                 response_message = (
                     f"✅ *Settings Updated Successfully*\n\n"
                     f"*Candle Interval:* {candle_interval}\n"
                     f"*Symbol:* {symbol}\n"
-                    f"*Quantity:* {quantity}\n"
+                    f"*Quantity:* {quantity_display}\n"
                     f"*Buy Offset:* {buy_long_offset}\n"
                     f"*Sell Offset:* {sell_long_offset}\n\n"
                 )
