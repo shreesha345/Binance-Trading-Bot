@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: uv run main.py
+    volumes:
+      - .:/app
+      - /app/telegram_bot  # This will override the telegram_bot folder inside the container with an empty folder, effectively excluding it
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    networks:
+      - botnet
+
+  telegram_bot:
+    build:
+      context: .
+      dockerfile: telegram_bot/Dockerfile.telegram
+    command: uv run bot.py
+    volumes:
+      - ./telegram_bot:/app
+    working_dir: /app
+    environment:
+      - API_BASE_URL=http://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - botnet
+
+networks:
+  botnet:
+    driver: bridge
