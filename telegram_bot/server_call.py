@@ -4,7 +4,8 @@ import os
 
 load_dotenv()
 
-base_url = "http://localhost:8000"  # Replace with your FastAPI server URL
+# Use environment variable for base URL, default to localhost for development
+base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 def control_bot_start():
     """
