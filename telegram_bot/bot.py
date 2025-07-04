@@ -13,6 +13,12 @@ import json
 import os
 import random
 import string
+from razerpay import (
+    create_payment_link_with_breakdown, check_payment_status, 
+    save_customer_details, get_customer_details,
+    save_payment_link_info, get_payment_info_by_chat_id,
+    verify_payment_and_update_cycle, is_payment_allowed
+)
 
 help_message = (
         "📖 *Complete Command List:*\n\n"
@@ -26,18 +32,22 @@ help_message = (
         "🔕 /stop\\_notify - Disable notifications\n\n"
         "📊 *Statistics & Info:*\n"
         "📊 /total\\_messages - View message count statistics\n"
-        "💰 /payments - View payment details\n"
-        "💳 /payment\\_made - Record a completed payment\n"
-        "❌ /cancel\\_payment - Cancel an ongoing payment process\n\n"
+        "💰 /payments - View payment details\n\n"
+        "💳 *Payment Options:*\n"
+        "💳 /pay\\_razer - Make payment with Razorpay\n"
+        "✅ /done - Verify completed payment\n\n"
         "📝 *Settings Format:*\n"
         "`candle_interval,symbol,quantity,buy_offset,sell_offset`\n"
         "Example: `1m,BTCUSDT,0.01,10,10`\n\n"
         "⚠️ *Payment System:*\n"
-        "• Payment is due on the specified due date\n"
-        "• Payments can only be made on or after the due date\n"
-        "• You have 1 extra day after the due date to make payment\n" 
-        "• If payment is not made, only /help, /payments, /payment\\_made, /total\\_messages, and /cancel\\_payment will work\n"
-        "• All other commands will be blocked until payment is made"
+        "• Payment cycle starts from your last payment date\n"
+        "• Next bill date is calculated using payment\\_cycle\\_days\n"
+        "• Due date is 1 day before the next bill date\n"
+        "• Grace period: 1 day after due date for payment\n"
+        "• Message costs are calculated per payment cycle\n"
+        "• If payment is overdue, bot stops and only allows:\n"
+        "  /start, /help, /payments, /pay\\_razer, /done, /cancel, /total\\_messages\n"
+        "• All other commands are blocked until payment is made"
     )
 
 # Create a dedicated logger for chat messages
@@ -126,6 +136,96 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Helper functions for date handling and message counting
+def string_to_ist(dt_string):
+    """Convert string to IST datetime"""
+    ist = pytz.timezone('Asia/Kolkata')
+    # Handle both ISO format and custom format strings
+    try:
+        if 'T' in dt_string:
+            dt = datetime.fromisoformat(dt_string)
+        else:
+            dt = datetime.strptime(dt_string, "%Y-%m-%d %H:%M:%S")
+        
+        # If the datetime has no timezone info, assume it's in UTC and convert to IST
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc).astimezone(ist)
+        return dt
+    except (ValueError, TypeError) as e:
+        print(f"❌ Error converting date string: {e}")
+        return get_ist_now()
+
+def get_ist_now():
+    """Get current time in IST"""
+    ist = pytz.timezone('Asia/Kolkata')
+    return datetime.now(ist)
+
+def count_messages_for_date_range(chat_id, start_date, end_date):
+    """
+    Count messages for a specific chat_id within a date range
+    
+    Args:
+        chat_id: The chat ID to filter messages for
+        start_date: Start date (inclusive) - can be date or datetime object
+        end_date: End date (exclusive) - can be date or datetime object
+    
+    Returns:
+        tuple: (total_messages, sent_messages, received_messages, first_message, last_message, all_messages)
+    """
+    try:
+        json_log_file = os.path.join(os.path.dirname(__file__), 'chat_messages.json')
+        
+        if not os.path.exists(json_log_file) or os.path.getsize(json_log_file) == 0:
+            return 0, 0, 0, None, None, []
+            
+        # Convert date objects to date if they're datetime objects
+        if isinstance(start_date, datetime):
+            start_date = start_date.date()
+        if isinstance(end_date, datetime):
+            end_date = end_date.date()
+        
+        # Read messages from file
+        with open(json_log_file, 'r', encoding='utf-8') as f:
+            chat_history = json.load(f)
+            messages = chat_history.get("messages", [])
+        
+        # Filter by chat_id
+        messages = [msg for msg in messages if str(msg.get("chat_id")) == str(chat_id)]
+        
+        # Filter by date range
+        filtered_messages = []
+        for msg in messages:
+            try:
+                # First try to use the timestamp for consistent datetime handling
+                if "timestamp" in msg:
+                    msg_timestamp = string_to_ist(msg.get("timestamp", ""))
+                    msg_date = msg_timestamp.date()
+                else:
+                    # Fall back to date field if timestamp not available
+                    msg_date = datetime.strptime(msg.get("date", "1970-01-01"), '%Y-%m-%d').date()
+                
+                # Include start date but exclude end date for cycle counting
+                if start_date <= msg_date < end_date:
+                    filtered_messages.append(msg)
+            except (ValueError, TypeError) as e:
+                print(f"❌ Error processing message date in count_messages_for_date_range: {e}")
+                continue
+        
+        # Count messages
+        total_messages = len(filtered_messages)
+        total_sent = sum(1 for msg in filtered_messages if msg.get("type") == "SENT")
+        total_received = sum(1 for msg in filtered_messages if msg.get("type") == "RECEIVED")
+        
+        # Get first and last message
+        first_message = filtered_messages[0] if filtered_messages else None
+        last_message = filtered_messages[-1] if filtered_messages else None
+        
+        return total_messages, total_sent, total_received, first_message, last_message, filtered_messages
+        
+    except Exception as e:
+        print(f"❌ Error counting messages for date range: {e}")
+        return 0, 0, 0, None, None, []
 
 # Telegram bot token (set this as environment variable)
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -271,9 +371,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔔 /notify - Enable notifications\n"
         "🔕 /stop\\_notify - Disable notifications\n\n"
         "📊 /total\\_messages - View message stats\n"
-        "💰 /payments - View payment details\n"
-        "💳 /payment\\_made - Record a payment\n"
-        "❌ /cancel\\_payment - Cancel payment process\n\n"
+        "💰 /payments - View payment details\n\n"
+        "💳 *Payment Options:*\n"
+        "💳 /pay\\_razer - Make payment with Razorpay\n"
+        "✅ /done - Verify completed payment\n"
+        "❌ /cancel - Cancel payment process\n\n"
         "📝 *Settings Format:*\n"
         "`interval,symbol,quantity,buy_long_offset,sell_long_offset`\n"
         "Example: `1m,BTCUSDT,0.01,10,10`\n\n"
@@ -317,9 +419,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔕 /stop\\_notify - Disable notifications\n\n"
         "📊 *Statistics & Info:*\n"
         "📊 /total\\_messages - View message count statistics\n"
-        "💰 /payments - View payment details\n"
-        "💳 /payment\\_made - Record a completed payment\n"
-        "❌ /cancel\\_payment - Cancel an ongoing payment process\n\n"
+        "💰 /payments - View payment details\n\n"
+        "💳 *Payment System:*\n"
+        "💵 /pay\\_razer - Make a payment via Razorpay\n"
+        "✅ /done - Verify payment completion\n"
+        "❌ /cancel - Cancel an ongoing payment process\n\n"
         "📝 *Settings Format:*\n"
         "`candle_interval,symbol,quantity,buy_long_offset,sell_long_offset`\n"
         "Example: `1m,BTCUSDT,0.01,10,10`\n\n"
@@ -327,7 +431,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Payment is due on the specified due date\n"
         "• Payments can only be made on or after the due date\n"
         "• You have 1 extra day after the due date to make payment\n" 
-        "• If payment is not made, only /help, /payments, /payment\\_made, /total\\_messages, and /cancel\\_payment will work\n"
+        "• If payment is not made, only /help, /payments, /pay\\_razer, /done, and /total\\_messages will work\n"
         "• All other commands will be blocked until payment is made"
     )
     
@@ -498,6 +602,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"📥 Received message: '{message_text}' from chat_id: {chat_id}")
     log_message("RECEIVED", chat_id, update.message.from_user.username, "private", message_text)  # Log received message
 
+    # Check if awaiting customer details for payment
+    if notify_users.get(chat_id, {}).get("awaiting_customer_details", False):
+        current_field = notify_users[chat_id].get("current_field")
+        
+        if current_field:
+            # Save the provided field
+            notify_users[chat_id]["customer_details"][current_field] = message_text
+            
+            # Update customer details in storage
+            save_customer_details(
+                chat_id,
+                name=notify_users[chat_id]["customer_details"].get("name"),
+                email=notify_users[chat_id]["customer_details"].get("email"),
+                phone=notify_users[chat_id]["customer_details"].get("phone")
+            )
+            
+            # Check if we have more fields to collect
+            missing_fields = notify_users[chat_id]["missing_fields"]
+            missing_fields.remove(current_field)
+            
+            if missing_fields:
+                # Ask for the next field
+                next_field = missing_fields[0]
+                notify_users[chat_id]["current_field"] = next_field
+                
+                if next_field == "name":
+                    message = "Please enter your full name for the payment:\n(You can use /cancel to stop the payment process)"
+                elif next_field == "phone":
+                    message = "Please enter your phone number with country code (e.g., +919876543210):\n(You can use /cancel to stop the payment process)"
+                else:
+                    message = f"Please enter your {next_field}:"
+                
+                await update.message.reply_text(message)
+                log_message("SENT", chat_id, "", "private", message)
+                return
+            else:
+                # All fields collected, reset state
+                notify_users[chat_id]["awaiting_customer_details"] = False
+                
+                # Run the pay_razer command again now that we have all details
+                await pay_razer_command(update, context)
+                return
+    
     # Check if user is awaiting settings input
     if notify_users.get(chat_id, {}).get("awaiting_settings", False):
         if not SERVER_CALL_AVAILABLE:
@@ -614,56 +761,77 @@ async def total_messages_command(update: Update, context: ContextTypes.DEFAULT_T
             )
             log_message("SENT", chat_id, "", "private", "Invalid date format error")
             return
-    
-    # Read message history directly from JSON file
-    try:
-        json_log_file = os.path.join(os.path.dirname(__file__), 'chat_messages.json')  # Read from telegram_bot folder
-        
-        if not os.path.exists(json_log_file) or os.path.getsize(json_log_file) == 0:
-            messages = []
-        else:
-            with open(json_log_file, 'r', encoding='utf-8') as f:
-                chat_history = json.load(f)
-                messages = chat_history.get("messages", [])
-                
-            # Filter by chat_id
-            messages = [msg for msg in messages if str(msg.get("chat_id")) == str(chat_id)]
+    else:
+        # No date arguments provided - use current payment cycle
+        try:
+            # Load payment cycle information from payments.json
+            payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
             
-            # Filter by date range if provided
-            if start_date and end_date:
-                filtered_messages = []
-                for msg in messages:
-                    try:
-                        msg_date = datetime.strptime(msg.get("date", "1970-01-01"), '%Y-%m-%d').date()
-                        if start_date <= msg_date <= end_date:
-                            filtered_messages.append(msg)
-                    except (ValueError, TypeError):
-                        # Skip messages with invalid date format
-                        continue
-                messages = filtered_messages
+            if os.path.exists(payments_file) and os.path.getsize(payments_file) > 0:
+                with open(payments_file, 'r', encoding='utf-8') as f:
+                    payment_data = json.load(f)
                 
-    except Exception as e:
-        print(f"❌ Error retrieving chat history: {e}")
-        messages = []
+                # Extract payment dates
+                last_payment_date_str = payment_data.get("last_payment_date", "")
+                due_date_str = payment_data.get("due_date", "")
+                payment_cycle_days = payment_data.get("payment_cycle_days", 28)
+                
+                if last_payment_date_str:
+                    last_payment_date = string_to_ist(last_payment_date_str)
+                    # Convert to date object for filtering
+                    start_date = last_payment_date.date()
+                    
+                    # If due_date is provided, use it, otherwise calculate it
+                    if due_date_str:
+                        due_date = string_to_ist(due_date_str)
+                        end_date = due_date.date()
+                    else:
+                        due_date = calculate_due_date(last_payment_date, payment_cycle_days)
+                        end_date = due_date.date()
+                    
+                    date_range_str = f" for current payment cycle ({start_date} to {end_date})"
+        except Exception as e:
+            print(f"❌ Error loading payment cycle: {e}")
+            # No filtering for dates if there's an error
     
-    # Count messages
-    total_messages = len(messages)
-    total_sent = sum(1 for msg in messages if msg.get("type") == "SENT")
-    total_received = sum(1 for msg in messages if msg.get("type") == "RECEIVED")
+    # Use the common function to count messages for the date range
+    if start_date and end_date:
+        total_messages, total_sent, total_received, first_msg, last_msg, messages = count_messages_for_date_range(
+            chat_id, start_date, end_date
+        )
+    else:
+        # No date range provided, count all messages
+        try:
+            json_log_file = os.path.join(os.path.dirname(__file__), 'chat_messages.json')
+            if not os.path.exists(json_log_file) or os.path.getsize(json_log_file) == 0:
+                messages = []
+            else:
+                with open(json_log_file, 'r', encoding='utf-8') as f:
+                    chat_history = json.load(f)
+                    messages = chat_history.get("messages", [])
+                    # Filter by chat_id
+                    messages = [msg for msg in messages if str(msg.get("chat_id")) == str(chat_id)]
+                    
+            total_messages = len(messages)
+            total_sent = sum(1 for msg in messages if msg.get("type") == "SENT")
+            total_received = sum(1 for msg in messages if msg.get("type") == "RECEIVED")
+            first_msg = messages[0] if messages else None
+            last_msg = messages[-1] if messages else None
+        except Exception as e:
+            print(f"❌ Error retrieving chat history: {e}")
+            messages = []
+            total_messages = total_sent = total_received = 0
+            first_msg = last_msg = None
     
     # Get date of first and last message in the filtered set
     first_message_date = "N/A"
     last_message_date = "N/A"
     
-    if messages:
-        try:
-            first_msg = messages[0]
-            first_message_date = f"{first_msg.get('date', 'N/A')} {first_msg.get('time', '')}"
-            
-            last_msg = messages[-1]
-            last_message_date = f"{last_msg.get('date', 'N/A')} {last_msg.get('time', '')}"
-        except (IndexError, KeyError):
-            pass
+    if first_msg:
+        first_message_date = f"{first_msg.get('date', 'N/A')} {first_msg.get('time', '')}"
+    
+    if last_msg:
+        last_message_date = f"{last_msg.get('date', 'N/A')} {last_msg.get('time', '')}"
     
     # Create response message with date range if specified
     response_message = (
@@ -673,8 +841,18 @@ async def total_messages_command(update: Update, context: ContextTypes.DEFAULT_T
         f"*Messages Received:* {total_received}\n\n"
         f"*First Message:* {first_message_date}\n"
         f"*Latest Message:* {last_message_date}\n\n"
+    )
+    
+    # Add note about filtering logic for payment cycle
+    if start_date and end_date and not context.args:
+        response_message += (
+            "*Note:* For payment cycle statistics, messages are counted from the last payment date (inclusive) "
+            "up to the due date (exclusive).\n\n"
+        )
+    
+    response_message += (
         "*Usage:*\n"
-        "• `/total_messages` - Show all messages\n"
+        "• `/total_messages` - Show messages for current payment cycle\n"
         "• `/total_messages YYYY-MM-DD` - Show messages for specific date\n"
         "• `/total_messages YYYY-MM-DD YYYY-MM-DD` - Show messages in date range"
     )
@@ -702,54 +880,51 @@ async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             # Extract payment details
             server_cost = payment_data.get("server_cost", 0)
-            server_commission = payment_data.get("server_commission", 0)
             per_message_cost = payment_data.get("per_message_cost", 1)  # Read from payments.json
             message_monthly_cost = payment_data.get("message_monthly_cost", 0)
             support_cost = payment_data.get("support_cost", 0)
             
-            # Calculate total server cost (including commission)
-            total_server_cost = server_cost + server_commission
-            
             # Calculate message statistics for the current cycle
             json_log_file = os.path.join(os.path.dirname(__file__), 'chat_messages.json')
             
-            # Load payment cycle information
-            payment_cycle_file = os.path.join(os.path.dirname(__file__), 'payment_cycle.json')
-            
+            # Get payment cycle information directly from payments.json
             try:
-                if os.path.exists(payment_cycle_file) and os.path.getsize(payment_cycle_file) > 0:
-                    with open(payment_cycle_file, 'r', encoding='utf-8') as f:
-                        payment_cycle = json.load(f)
-                    
-                    # Extract payment dates - support both legacy and new format
-                    last_payment_date_str = payment_cycle.get("last_payment_date", "")
-                    
-                    # Get next bill date and due date, handling both old and new formats
-                    next_bill_date_str = payment_cycle.get("next_bill_date", payment_cycle.get("next_payment_date", ""))
-                    due_date_str = payment_cycle.get("due_date", "")
-                    
-                    # Get payment cycle days
-                    payment_cycle_days = payment_cycle.get("payment_cycle_days", 28)
-                    
-                    # Parse dates using IST timezone
-                    if last_payment_date_str:
-                        last_payment_date = string_to_ist(last_payment_date_str)
-                    else:
-                        last_payment_date = get_ist_now() - timedelta(days=payment_cycle_days)
-                    
-                    # If due_date is provided, use it, otherwise calculate it
-                    if due_date_str:
-                        due_date = string_to_ist(due_date_str)
-                    elif next_bill_date_str:
-                        next_bill_date = string_to_ist(next_bill_date_str)
-                        due_date = next_bill_date - timedelta(days=1)
-                    else:
-                        due_date = calculate_due_date(last_payment_date, payment_cycle_days)
+                # Extract payment dates - using the payment_data we already loaded
+                last_payment_date_str = payment_data.get("last_payment_date", "")
+                next_bill_date_str = payment_data.get("next_bill_date", "")
+                due_date_str = payment_data.get("due_date", "")
+                
+                # Get payment cycle days
+                payment_cycle_days = payment_data.get("payment_cycle_days", 28)
+                
+                # Parse dates using IST timezone
+                if last_payment_date_str:
+                    last_payment_date = string_to_ist(last_payment_date_str)
                 else:
-                    # Default to last 28 days if file doesn't exist
-                    payment_cycle_days = payment_data.get("payment_cycle_days", 28)
+                    # Default if no payment date is set
                     last_payment_date = get_ist_now() - timedelta(days=payment_cycle_days)
+                
+                # If due_date is provided, use it, otherwise calculate it
+                if due_date_str:
+                    due_date = string_to_ist(due_date_str)
+                elif next_bill_date_str:
+                    next_bill_date = string_to_ist(next_bill_date_str)
+                    due_date = next_bill_date - timedelta(days=1)
+                else:
+                    # Calculate dates if not provided
                     due_date = calculate_due_date(last_payment_date, payment_cycle_days)
+                    next_bill_date = due_date + timedelta(days=1)
+                    
+                    # Update payments.json with calculated dates if they're missing
+                    if not due_date_str or not next_bill_date_str:
+                        payment_data["due_date"] = due_date.isoformat()
+                        payment_data["next_bill_date"] = next_bill_date.isoformat()
+                        payment_data["next_bill_due_date"] = (next_bill_date + timedelta(days=1)).isoformat()
+                        
+                        # Save updated payment data
+                        with open(payments_file, 'w', encoding='utf-8') as f:
+                            json.dump(payment_data, f, indent=2, ensure_ascii=False)
+                            print("✅ Updated payments.json with missing cycle dates")
             except Exception as e:
                 print(f"❌ Error loading payment cycle: {e}")
                 # Default to last 28 days if there was an error
@@ -767,29 +942,14 @@ async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Get detailed payment status
             is_overdue, status_message = get_payment_status_info()
             
-            # Get total message count in the current cycle
-            messages_in_cycle = 0
-            if os.path.exists(json_log_file) and os.path.getsize(json_log_file) > 0:
-                with open(json_log_file, 'r', encoding='utf-8') as f:
-                    chat_history = json.load(f)
-                    all_messages = chat_history.get("messages", [])
-                    
-                    # Count messages in the current cycle up to (but not including) due date
-                    for msg in all_messages:
-                        try:
-                            msg_timestamp = string_to_ist(msg.get("timestamp", ""))
-                            
-                            # Include messages between last payment and due date (excluding due date)
-                            if msg_timestamp >= last_payment_date:
-                                # Reset time components to compare only dates
-                                msg_date = msg_timestamp.replace(hour=0, minute=0, second=0, microsecond=0).date()
-                                due_date_only = due_date.replace(hour=0, minute=0, second=0, microsecond=0).date()
-                                
-                                if msg_date < due_date_only:
-                                    messages_in_cycle += 1
-                        except (ValueError, TypeError) as e:
-                            print(f"❌ Error processing message timestamp: {e}")
-                            continue
+            # Get total message count in the current cycle using the common function
+            last_payment_date_only = last_payment_date.date()
+            due_date_only = due_date.date()
+            
+            # Use the shared function to count messages for the payment cycle
+            messages_in_cycle, sent_messages, received_messages, _, _, _ = count_messages_for_date_range(
+                chat_id, last_payment_date_only, due_date_only
+            )
             
             # Calculate message cost examples
             messages_for_1_rupee = int(1 / per_message_cost) if per_message_cost > 0 else 0
@@ -806,13 +966,13 @@ async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             due_date_display = due_date.strftime("%Y-%m-%d")
             
             # Calculate total cost (including message cost for this cycle)
-            total_overall_cost = total_server_cost + message_monthly_cost + support_cost
+            total_overall_cost = server_cost + message_monthly_cost + support_cost
             
             # Format response with emojis and message usage information
             response_message = (
                 "💰 *Payment Details* 💰\n\n"
                 f"🖥️ *Server Costs*\n"
-                f"  • Server Cost: ₹{total_server_cost:.2f}\n\n"
+                f"  • Server Cost: ₹{server_cost:.2f}\n\n"
                 f"📱 *Messaging*\n"
                 f"  • Total Messages: {messages_in_cycle}\n"
                 f"  • Per Message Cost: ₹{per_message_cost:.2f}\n"
@@ -828,12 +988,12 @@ async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"----------------------------------------\n"
                 f"💳 *Total Cost: ₹{total_overall_cost:.2f}*\n"
                 f"----------------------------------------\n\n"
-                f"ℹ️ Message costs are calculated based on the usage during your {payment_cycle_days}-day billing cycle."
+                f"ℹ️ Message costs are calculated for messages sent between {last_payment_display} (inclusive) and {due_date_display} (exclusive) - a {payment_cycle_days}-day billing cycle."
             )
             
             # Add overdue warning as a separate message if needed
             if is_overdue:
-                response_message += "\n\n⚠️ *PAYMENT OVERDUE* - Most bot commands are blocked until payment is made. Use /payment\\_made to make a payment."
+                response_message += "\n\n⚠️ *PAYMENT OVERDUE* - Most bot commands are blocked until payment is made. Use /pay\\_razer to make a payment. If you need to cancel during the payment process, use /cancel."
     except Exception as e:
         print(f"❌ Error retrieving payment information: {e}")
         response_message = f"❌ Error retrieving payment information: {str(e)}"
@@ -852,605 +1012,206 @@ async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as fallback_error:
             print(f"❌ Error sending fallback message: {fallback_error}")
 
-async def payment_made_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /payment_made command to generate a payment QR code with breakdown"""
+async def pay_razer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /pay_razer command to generate a Razerpay payment link"""
     # Log the command
     chat_id = update.effective_chat.id
     username = update.effective_user.username if update.effective_user else "unknown"
     chat_type = update.effective_chat.type if update.effective_chat else "private"
-    log_message("RECEIVED", chat_id, username, chat_type, "/payment_made")
+    log_message("RECEIVED", chat_id, username, chat_type, "/pay_razer")
     
-    try:
-        # Calculate the current total cost to store with the payment record
-        # Read payment details from JSON file
-        payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
-        
-        if not os.path.exists(payments_file):
-            # Create a default payments file if it doesn't exist
-            payment_data = {
-                "server_cost": 500,
-                "server_commission": 50,
-                "per_message_cost": 1,  # Default value - read from the file
-                "message_monthly_cost": 100,
-                "support_cost": 100,
-                "payment_cycle_days": 28
-            }
-            with open(payments_file, 'w', encoding='utf-8') as f:
-                json.dump(payment_data, f, indent=2, ensure_ascii=False)
-        else:
-            # Get payment data
-            try:
-                with open(payments_file, 'r', encoding='utf-8') as f:
-                    payment_data = json.load(f)
-            except Exception as e:
-                print(f"❌ Error reading payments file: {e}")
-                # Create a default payment data structure
-                payment_data = {
-                    "server_cost": 500,
-                    "server_commission": 50,
-                    "per_message_cost": 1,
-                    "message_monthly_cost": 100,
-                    "support_cost": 100,
-                    "payment_cycle_days": 28
-                }
-                
-        # Extract payment details
-        server_cost = payment_data.get("server_cost", 0)
-        server_commission = payment_data.get("server_commission", 0)
-        per_message_cost = payment_data.get("per_message_cost", 1)  # Read from payments.json
-        message_monthly_cost = payment_data.get("message_monthly_cost", 0)
-        support_cost = payment_data.get("support_cost", 0)
-        payment_cycle_days = payment_data.get("payment_cycle_days", 28)
-        
-        # Calculate total server cost (including commission)
-        total_server_cost = server_cost + server_commission
-        
-        # Load payment cycle file and message history
-        payment_cycle_file = os.path.join(os.path.dirname(__file__), 'payment_cycle.json')
-        json_log_file = os.path.join(os.path.dirname(__file__), 'chat_messages.json')
-        
-        # Initialize or load payment cycle with IST timezone
-        if not os.path.exists(payment_cycle_file):
-            # Create the file if it doesn't exist - use IST timezone
-            current_date = get_ist_now()
-            next_bill_date = calculate_next_bill_date(current_date, payment_cycle_days)
-            due_date = calculate_due_date(current_date, payment_cycle_days)
-            
-            payment_cycle = {
-                "last_payment_date": current_date.isoformat(),
-                "next_bill_date": next_bill_date.isoformat(),
-                "due_date": due_date.isoformat(),
-                "payment_cycle_days": payment_cycle_days,
-                "payment_history": [],
-                "current_payment_code": ""
-            }
-        else:
-            # Load existing payment cycle
-            with open(payment_cycle_file, 'r', encoding='utf-8') as f:
-                payment_cycle = json.load(f)
-                if "payment_history" not in payment_cycle:
-                    payment_cycle["payment_history"] = []
-                
-                # Update payment_cycle_days from payments.json if it exists
-                payment_cycle["payment_cycle_days"] = payment_cycle_days
-                
-                # Handle conversion from old format to new format
-                if "next_payment_date" in payment_cycle and "next_bill_date" not in payment_cycle:
-                    payment_cycle["next_bill_date"] = payment_cycle.pop("next_payment_date")
-                
-                # Calculate and add due_date if it doesn't exist
-                if "due_date" not in payment_cycle:
-                    last_payment_date = string_to_ist(payment_cycle["last_payment_date"])
-                    due_date = calculate_due_date(last_payment_date, payment_cycle_days)
-                    payment_cycle["due_date"] = due_date.isoformat()
-                
-                # Ensure next_bill_date exists
-                if "next_bill_date" not in payment_cycle:
-                    last_payment_date = string_to_ist(payment_cycle["last_payment_date"])
-                    next_bill_date = calculate_next_bill_date(last_payment_date, payment_cycle_days)
-                    payment_cycle["next_bill_date"] = next_bill_date.isoformat()
-        
-        # Check if payment is allowed on current date
-        last_payment_date_str = payment_cycle.get("last_payment_date", "")
-        next_bill_date_str = payment_cycle.get("next_bill_date", "") or payment_cycle.get("next_payment_date", "")
-        due_date_str = payment_cycle.get("due_date", "")
-        
-        # If due_date doesn't exist, calculate it
-        if not due_date_str and next_bill_date_str:
-            due_date = calculate_due_date(string_to_ist(last_payment_date_str), payment_cycle_days)
-            due_date_str = due_date.isoformat()
-            payment_cycle["due_date"] = due_date_str
-        
-        # Get current date for informational message
-        today = get_ist_now()
-        today_date = today.replace(hour=0, minute=0, second=0, microsecond=0).date()
-        due_date_dt = string_to_ist(due_date_str)
-        due_date_only = due_date_dt.replace(hour=0, minute=0, second=0, microsecond=0).date()
-        due_date_display = due_date_dt.strftime("%Y-%m-%d")
-        
-        # Check if payment is allowed based on date
-        if today_date < due_date_only:
-            # Payment is being made early - block payment
-            info_message = (
-                f"❌ *Payment Not Allowed*\n\n"
-                f"You cannot make payments before the due date.\n"
-                f"The scheduled due date is: {due_date_display}\n\n"
-                f"Please wait until the due date to make your payment."
-            )
-            await update.message.reply_text(info_message, parse_mode='Markdown')
-            log_message("SENT", update.effective_chat.id, "", "private", info_message)
-            return  # Exit the function to prevent payment
-        elif today_date > due_date_only + timedelta(days=1):
-            # Payment is overdue - informational message and allow payment
-            info_message = (
-                f"ℹ️ *Payment Information*\n\n"
-                f"Your payment is currently overdue. The due date was: {due_date_display}\n\n"
-                f"Your subscription will be renewed from today for the next billing period."
-            )
-            await update.message.reply_text(info_message, parse_mode='Markdown')
-            log_message("SENT", update.effective_chat.id, "", "private", info_message)
-        
-        # Calculate message usage in the current payment cycle
-        messages_in_cycle = 0
-        if os.path.exists(json_log_file) and os.path.getsize(json_log_file) > 0:
-            with open(json_log_file, 'r', encoding='utf-8') as f:
-                chat_history = json.load(f)
-                all_messages = chat_history.get("messages", [])
-                
-                # If there's a last payment date, count messages since then but exclude due date
-                if "last_payment_date" in payment_cycle and payment_cycle["last_payment_date"]:
-                    try:
-                        last_payment_timestamp = string_to_ist(payment_cycle["last_payment_date"])
-                        due_date_timestamp = string_to_ist(payment_cycle["due_date"]) if "due_date" in payment_cycle else None
-                        
-                        for msg in all_messages:
-                            try:
-                                msg_timestamp = string_to_ist(msg.get("timestamp", ""))
-                                
-                                # Include messages between last payment and due date (excluding due date)
-                                if msg_timestamp >= last_payment_timestamp:
-                                    # Reset time components to compare only dates
-                                    msg_date = msg_timestamp.replace(hour=0, minute=0, second=0, microsecond=0).date()
-                                    due_date_only = due_date_timestamp.replace(hour=0, minute=0, second=0, microsecond=0).date()
-                                    
-                                    # Only count messages before the due date (not including the due date)
-                                    if msg_date < due_date_only:
-                                        messages_in_cycle += 1
-                            except (ValueError, TypeError) as e:
-                                print(f"❌ Error processing message timestamp: {e}")
-                                continue
-                    except (ValueError, TypeError) as e:
-                        print(f"❌ Error processing payment dates: {e}")
-                        messages_in_cycle = len(all_messages)
-                else:
-                    messages_in_cycle = len(all_messages)
-        
-        # Calculate current message cost
-        current_message_cost = messages_in_cycle * per_message_cost
-        
-        # Update message_monthly_cost based on the current billing cycle messages
-        message_monthly_cost = current_message_cost  # Use the actual message cost for this cycle
-        
-        # Calculate total cost for this payment cycle (including message costs)
-        total_cost = total_server_cost + message_monthly_cost + support_cost
-        
-        # Generate a random payment code (all uppercase with letters and numbers)
-        import random
-        import string
-        payment_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        
-        # Store the payment code in the payment cycle file for verification later
-        payment_cycle["current_payment_code"] = payment_code
-        
-        # Save updated payment cycle with the payment code
-        with open(payment_cycle_file, 'w', encoding='utf-8') as f:
-            json.dump(payment_cycle, f, indent=2, ensure_ascii=False)
-        
-        # Format the cost breakdown message
-        cost_breakdown = (
-            "💰 *Payment Cost Breakdown* 💰\n\n"
-            f"🖥️ *Server Costs*\n"
-            f"  • Server Cost: ₹{server_cost + server_commission:.2f}\n\n"
-            f"📱 *Messaging*\n"
-            f"  • Messages in Cycle: {messages_in_cycle}\n"
-            f"  • Per Message Cost: ₹{per_message_cost:.2f}\n"
-            f"  • Total Message Cost: ₹{message_monthly_cost:.2f}\n\n"
-            f"👨‍💻 *Support*\n"
-            f"  • Support Cost: ₹{support_cost:.2f}\n\n"
-            f"----------------------------------------\n"
-            f"💳 *Total Amount Due: ₹{total_cost:.2f}*\n"
-            f"----------------------------------------\n\n"
-            "Generating QR code for payment..."
+    # Check if payment is allowed based on due date
+    payment_allowed, reason = is_payment_allowed(chat_id)
+    
+    if not payment_allowed:
+        await update.message.reply_text(
+            f"❌ *Payment Not Allowed*\n\n{reason}\n\nPayments can only be made on or after the due date.",
+            parse_mode='Markdown'
         )
-        
-        # Send the cost breakdown
-        await update.message.reply_text(cost_breakdown, parse_mode='Markdown')
-        log_message("SENT", update.effective_chat.id, "", "private", cost_breakdown)
-        
-        # Generate QR code with the payment code as the message
-        if SERVER_CALL_AVAILABLE:
-            try:
-                # Make sure the QR code directory exists inside telegram_bot folder
-                qr_dir = os.path.join(os.path.dirname(__file__), 'qr_codes')
-                os.makedirs(qr_dir, exist_ok=True)
-                
-                # Generate QR code with amount and payment code - use a consistent filename
-                qr_save_path = os.path.join(qr_dir, "upi_qr_code.png")
-                qr_result = server_call.get_qrcode(
-                    amount=int(total_cost),
-                    message=payment_code,
-                    save_path=qr_save_path
-                )
-                
-                # Send the QR code image to the user
-                await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=open(qr_save_path, "rb"),
-                    caption=f"Please scan this QR code to make a payment of ₹{total_cost:.2f}\n\nReference Code: {payment_code}\n\nAfter making the payment, please take a screenshot of the payment confirmation and send it here."
-                )
-                log_message("SENT", chat_id, "", "private", "Sent QR code for payment")
-                
-                # Store chat_id in context.user_data to know this user is in payment flow
-                context.user_data["awaiting_payment_screenshot"] = True
-                context.user_data["payment_code"] = payment_code
-                context.user_data["payment_amount"] = total_cost
-                
-            except Exception as e:
-                print(f"❌ Error generating QR code: {e}")
-                await update.message.reply_text(f"❌ Error generating QR code: {str(e)}", parse_mode=None)
-                log_message("SENT", chat_id, "", "private", f"Error generating QR code: {str(e)}")
-        else:
-            await update.message.reply_text("❌ Server is not available to generate QR code.", parse_mode='Markdown')
-            log_message("SENT", chat_id, "", "private", "Server not available to generate QR code")
-            
-    except Exception as e:
-        print(f"❌ Error in payment flow: {e}")
-        await update.message.reply_text(f"❌ Error in payment flow: {str(e)}", parse_mode=None)
-        log_message("SENT", update.effective_chat.id, "", "private", f"Error in payment flow: {str(e)}")
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for photo messages - used in payment flow to process payment screenshots"""
-    chat_id = update.effective_chat.id
-    username = update.effective_user.username if update.effective_user else "unknown"
-    chat_type = update.effective_chat.type if update.effective_chat else "private"
-    log_message("RECEIVED", chat_id, username, chat_type, "[PHOTO]")
-    
-    # Check if this user is in the payment flow
-    if not context.user_data.get("awaiting_payment_screenshot", False):
-        await update.message.reply_text("I received your photo, but I'm not expecting a payment screenshot. Use /payment_made to start the payment process.", parse_mode=None)
-        log_message("SENT", chat_id, "", "private", "Received unexpected photo")
+        log_message("SENT", chat_id, "", "private", f"Payment not allowed: {reason}")
         return
     
-    try:
-        # User is in payment flow, download the photo
-        photo_file = await context.bot.get_file(update.message.photo[-1].file_id)
+    # Get customer details if previously saved
+    customer = get_customer_details(chat_id)
+    
+    # Check if we have all required details
+    if not customer or not all(key in customer for key in ["name", "phone"]):
+        # We need to ask for customer details
+        if not customer:
+            customer = {}
         
-        # Create a temporary directory inside telegram_bot folder
-        temp_dir = os.path.join(os.path.dirname(__file__), 'temp_screenshots')
-        os.makedirs(temp_dir, exist_ok=True)
+        # Check what information we're missing
+        missing_fields = []
+        if "name" not in customer:
+            missing_fields.append("name")
+        if "phone" not in customer:
+            missing_fields.append("phone")
         
-        # Create a temporary file for the photo - use a consistent filename for each chat_id
-        temp_file_path = os.path.join(temp_dir, f"payment_screenshot_{chat_id}.jpg")
-        await photo_file.download_to_drive(temp_file_path)
+        # Initialize state for awaiting customer details
+        if "awaiting_customer_details" not in notify_users.get(chat_id, {}):
+            if chat_id not in notify_users:
+                notify_users[chat_id] = {}
+            notify_users[chat_id]["awaiting_customer_details"] = True
+            notify_users[chat_id]["customer_details"] = customer.copy()
+            notify_users[chat_id]["missing_fields"] = missing_fields
+            notify_users[chat_id]["current_field"] = missing_fields[0] if missing_fields else None
         
-        # Let the user know we're processing
-        await update.message.reply_text("🔍 Processing your payment screenshot... Please wait.", parse_mode=None)
-        log_message("SENT", chat_id, "", "private", "Processing payment screenshot")
-        
-        if SERVER_CALL_AVAILABLE:
-            try:
-                # Use the photo_scanner function to extract payment details
-                scan_result = server_call.photo_scanner(temp_file_path)
-                
-                if not scan_result:
-                    await update.message.reply_text("❌ Could not extract payment details from the image. Please make sure the payment screenshot is clear and try again.", parse_mode=None)
-                    log_message("SENT", chat_id, "", "private", "Failed to extract payment details")
-                    return
-                
-                # Verify the payment details
-                payment_amount = scan_result.get("amount")
-                payment_recipient = scan_result.get("to", "")
-                payment_message = scan_result.get("message", "")
-                payment_date = scan_result.get("date", "")
-                payment_time = scan_result.get("time", "")
-                payment_sender = scan_result.get("from", "")
-                payment_upi_id = scan_result.get("upi_transaction_id", "")
-                payment_google_id = scan_result.get("google_transaction_id", "")
-                
-                # Get the expected payment code and amount
-                expected_payment_code = context.user_data.get("payment_code", "")
-                expected_payment_amount = context.user_data.get("payment_amount", 0)
-                expected_recipient = "Shreesha Aithal - shreeshaaithal862-4@oksbi"
-                
-                # Verify payment details
-                verification_issues = []
-                
-                if payment_message != expected_payment_code:
-                    verification_issues.append(f"❌ Payment reference code does not match. Expected: {expected_payment_code}, Found: {payment_message}")
-                
-                if int(payment_amount) != int(expected_payment_amount):
-                    verification_issues.append(f"❌ Payment amount does not match. Expected: ₹{expected_payment_amount:.2f}, Found: ₹{payment_amount}")
-                
-                if expected_recipient not in payment_recipient:
-                    verification_issues.append(f"❌ Payment recipient does not match. Expected: {expected_recipient}, Found: {payment_recipient}")
-                
-                if verification_issues:
-                    # There were issues with the payment verification
-                    error_message = "⚠️ Payment Verification Issues\n\n" + "\n".join(verification_issues)
-                    await update.message.reply_text(error_message, parse_mode=None)
-                    log_message("SENT", chat_id, "", "private", error_message)
-                    return
-                
-                # If we got here, the payment was verified successfully
-                # Update the payment cycle
-                payment_cycle_file = os.path.join(os.path.dirname(__file__), 'payment_cycle.json')
-                json_log_file = os.path.join(os.path.dirname(__file__), 'chat_messages.json')
-                
-                # Load existing payment cycle
-                with open(payment_cycle_file, 'r', encoding='utf-8') as f:
-                    payment_cycle = json.load(f)
-                
-                # Calculate message usage in the current payment cycle
-                messages_in_cycle = 0
-                if os.path.exists(json_log_file) and os.path.getsize(json_log_file) > 0:
-                    with open(json_log_file, 'r', encoding='utf-8') as f:
-                        chat_history = json.load(f)
-                        all_messages = chat_history.get("messages", [])
-                        
-                        # If there's a last payment date, count messages since then
-                        if "last_payment_date" in payment_cycle and payment_cycle["last_payment_date"]:
-                            try:
-                                last_payment_timestamp = string_to_ist(payment_cycle["last_payment_date"])
-                                due_date_timestamp = None
-                                
-                                # Get or calculate due date
-                                if "due_date" in payment_cycle:
-                                    due_date_timestamp = string_to_ist(payment_cycle["due_date"])
-                                elif "next_bill_date" in payment_cycle:
-                                    next_bill_timestamp = string_to_ist(payment_cycle["next_bill_date"])
-                                    due_date_timestamp = next_bill_timestamp - timedelta(days=1)
-                                else:
-                                    due_date_timestamp = calculate_due_date(last_payment_timestamp, payment_cycle.get("payment_cycle_days", 28))
-                                
-                                # Count messages in the current cycle up to (but not including) due date
-                                for msg in all_messages:
-                                    try:
-                                        msg_timestamp = string_to_ist(msg.get("timestamp", ""))
-                                        
-                                        # Include messages between last payment and due date (excluding due date)
-                                        if msg_timestamp >= last_payment_timestamp:
-                                            # Reset time components to compare only dates
-                                            msg_date = msg_timestamp.replace(hour=0, minute=0, second=0, microsecond=0).date()
-                                            due_date_only = due_date_timestamp.replace(hour=0, minute=0, second=0, microsecond=0).date()
-                                            
-                                            # Only count messages before the due date (not including the due date)
-                                            if msg_date < due_date_only:
-                                                messages_in_cycle += 1
-                                    except (ValueError, TypeError) as e:
-                                        print(f"❌ Error processing message timestamp: {e}")
-                                        continue
-                            except (ValueError, TypeError) as e:
-                                print(f"❌ Error processing payment dates: {e}")
-                                messages_in_cycle = len(all_messages)
-                        else:
-                            messages_in_cycle = len(all_messages)
-        
-                # Calculate current message cost
-                try:
-                    payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
-                    with open(payments_file, 'r', encoding='utf-8') as f:
-                        payment_data = json.load(f)
-                except Exception as e:
-                    print(f"❌ Error reading payments file: {e}")
-                    # Create a default payment data structure
-                    payment_data = {
-                        "server_cost": 500,
-                        "server_commission": 50,
-                        "per_message_cost": 1,
-                        "message_monthly_cost": 100,
-                        "support_cost": 100,
-                        "payment_cycle_days": 28
-                    }
-                
-                per_message_cost = payment_data.get("per_message_cost", 1)  # Read from payments.json
-                current_message_cost = messages_in_cycle * per_message_cost
-                
-                # Update message_monthly_cost based on the current billing cycle messages
-                message_monthly_cost = current_message_cost  # Use the actual message cost for this cycle
-                
-                # Update payment dates (in IST)
-                current_date = get_ist_now()
-                payment_cycle_days = payment_cycle.get("payment_cycle_days", 28)
-                
-                # Get current payment cycle information
-                old_due_date_str = payment_cycle.get("due_date", "")
-                old_next_bill_date_str = payment_cycle.get("next_bill_date", "")
-                
-                # Calculate the base date for the new billing cycle
-                # Always use the due date as the base date for calculations
-                # This ensures the billing cycle is consistent regardless of when payment is made
-                base_date = None
-                today = get_ist_now().replace(hour=0, minute=0, second=0, microsecond=0).date()
-                
-                # If there's a due date and it's not in the future, use it as the base date
-                if old_due_date_str:
-                    original_due_date = string_to_ist(old_due_date_str)
-                    due_date_only = original_due_date.replace(hour=0, minute=0, second=0, microsecond=0).date()
-                    
-                    # Log for debugging
-                    print(f"Original due date: {due_date_only.strftime('%Y-%m-%d')}")
-                    print(f"Today's date: {today.strftime('%Y-%m-%d')}")
-                    
-                    # If due date is in the past or today, use it as base date
-                    if due_date_only <= today:
-                        base_date = original_due_date
-                        print(f"Using due date as base: {due_date_only.strftime('%Y-%m-%d')}")
-                
-                # If no previous due date or due date is in the future, use current date
-                if not base_date:
-                    base_date = current_date
-                    print(f"Using current date as base: {current_date.strftime('%Y-%m-%d')}")
-                
-                # Calculate next bill date and due date from the base date
-                next_bill_date = calculate_next_bill_date(base_date, payment_cycle_days)
-                due_date = calculate_due_date(base_date, payment_cycle_days)
-                
-                # Log the calculation for debugging
-                print(f"Payment received on {current_date.strftime('%Y-%m-%d')}")
-                print(f"Base date for calculation: {base_date.strftime('%Y-%m-%d')}")
-                print(f"New billing period: {payment_cycle_days} days")
-                print(f"Next bill date set to: {next_bill_date.strftime('%Y-%m-%d')}")
-                print(f"Due date set to: {due_date.strftime('%Y-%m-%d')}")
-                print(f"Next bill date set to: {next_bill_date.strftime('%Y-%m-%d')}")
-                print(f"Due date set to: {due_date.strftime('%Y-%m-%d')}")
-                
-                # Add payment record to history
-                payment_record = {
-                    "payment_date": current_date.isoformat(),  # Keep for backward compatibility
-                    "actual_payment_date": current_date.isoformat(),
-                    "billing_start_date": base_date.isoformat(),
-                    "messages_count": messages_in_cycle,
-                    "message_cost": current_message_cost,
-                    "total_message_cost": message_monthly_cost,
-                    "total_cost": float(payment_amount),
-                    "payment_code": payment_message,
-                    "payment_upi_id": payment_upi_id,
-                    "payment_google_id": payment_google_id,
-                    "payment_sender": payment_sender,
-                    "payment_timestamp": f"{payment_date} {payment_time}"
-                }
-                payment_cycle["payment_history"].append(payment_record)
-                
-                # Update payment cycle dates
-                # Use base_date (due date) as the last_payment_date instead of current_date
-                # This ensures the billing cycle is always calculated from the due date
-                payment_cycle["last_payment_date"] = base_date.isoformat()
-                payment_cycle["next_bill_date"] = next_bill_date.isoformat()
-                payment_cycle["due_date"] = due_date.isoformat()
-                payment_cycle["current_payment_code"] = ""  # Clear the payment code
-                
-                # Save updated payment cycle
-                with open(payment_cycle_file, 'w', encoding='utf-8') as f:
-                    json.dump(payment_cycle, f, indent=2, ensure_ascii=False)
-                
-                # Format dates for display
-                actual_payment_date_display = current_date.strftime("%Y-%m-%d") 
-                last_payment_display = base_date.strftime("%Y-%m-%d")  # This is now the base_date
-                due_date_display = due_date.strftime("%Y-%m-%d")
-                base_date_display = base_date.strftime("%Y-%m-%d")
-                
-                # Send success message - removed Markdown formatting to prevent parsing errors
-                next_bill_date_display = next_bill_date.strftime("%Y-%m-%d")
-                success_message = (
-                    "✅ Payment Verified Successfully\n\n"
-                    "Payment Details\n"
-                    f"• Amount: ₹{payment_amount}\n"
-                    f"• Date: {payment_date}\n"
-                    f"• Time: {payment_time}\n"
-                    f"• From: {payment_sender}\n"
-                    f"• Reference Code: {payment_message}\n"
-                    f"• UPI Transaction ID: {payment_upi_id}\n\n"
-                    "Message Usage\n"
-                    f"• Total Messages: {messages_in_cycle}\n"
-                    f"• Per Message Cost: ₹{per_message_cost:.2f}\n"
-                    f"• Total Message Cost: ₹{message_monthly_cost:.2f}\n\n"
-                    "Payment Cycle Updated\n"
-                    f"• Actual Payment Date: {actual_payment_date_display}\n"
-                    f"• Billing Start Date: {last_payment_display}\n"
-                    f"• Next Due Date: {due_date_display}\n"
-                    f"• Next Bill Date: {next_bill_date_display}\n"
-                    f"• Billing Cycle: {payment_cycle.get('payment_cycle_days', 28)} days\n\n"
-                    "Your subscription has been renewed for the next billing cycle.\n"
-                    "Use /payments to view your updated payment details."
-                )
-                
-                await update.message.reply_text(success_message, parse_mode=None)
-                log_message("SENT", chat_id, "", "private", success_message)
-                
-                # Clear the payment flow state
-                context.user_data.pop("awaiting_payment_screenshot", None)
-                context.user_data.pop("payment_code", None)
-                context.user_data.pop("payment_amount", None)
-                
-            except Exception as e:
-                print(f"❌ Error processing payment screenshot: {e}")
-                await update.message.reply_text(f"❌ Error processing payment screenshot: {str(e)}", parse_mode=None)
-                log_message("SENT", chat_id, "", "private", f"Error processing payment screenshot: {str(e)}")
-        else:
-            await update.message.reply_text("❌ Server is not available to process payment screenshot.", parse_mode=None)
-            log_message("SENT", chat_id, "", "private", "Server not available to process payment screenshot")
-        
-        # Clean up the temporary file
-        try:
-            os.remove(temp_file_path)
-        except Exception:
-            pass
+        # Ask for the first missing field
+        if missing_fields:
+            field = missing_fields[0]
+            if field == "name":
+                message = "Please enter your full name for the payment:\n(You can use /cancel to stop the payment process)"
+            elif field == "phone":
+                message = "Please enter your phone number with country code (e.g., +919876543210):\n(You can use /cancel to stop the payment process)"
+            else:
+                message = f"Please enter your {field}:"
             
-    except Exception as e:
-        print(f"❌ Error handling photo: {e}")
-        await update.message.reply_text(f"❌ Error handling photo: {str(e)}", parse_mode=None)
-        log_message("SENT", chat_id, "", "private", f"Error handling photo: {str(e)}")
+            await update.message.reply_text(message)
+            log_message("SENT", chat_id, "", "private", message)
+            return
+    
+    # We have all required details, generate payment link
+    try:
+        # Create payment link
+        result = create_payment_link_with_breakdown(
+            customer_name=customer.get("name", "Trading Bot User"),
+            customer_email=customer.get("email"),
+            customer_phone=customer.get("phone")
+        )
         
-        # Clear the payment flow state
-        context.user_data.pop("awaiting_payment_screenshot", None)
-        context.user_data.pop("payment_code", None)
-        context.user_data.pop("payment_amount", None)
+        if result.get("status") == "success":
+            # Save payment info
+            save_payment_link_info(chat_id, result)
+            
+            # Send payment link
+            payment_link = result.get("payment_link")
+            amount = result.get("amount", 0)
+            breakdown = result.get("breakdown", {})
 
-async def cancel_payment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /cancel_payment command to cancel ongoing payment process"""
+            # Format a nice message with breakdown
+            message = (
+                f"💳 *Payment Link Generated*\n\n"
+                f"Total Amount: ₹{amount:.2f}\n\n"
+                f"*Breakdown:*\n"
+                f"• Server Cost: ₹{breakdown.get('Server Cost', 0):.2f}\n"
+                f"• Message Cost: ₹{breakdown.get('Message Monthly Cost', 0):.2f}\n"
+                f"• Support Cost: ₹{breakdown.get('Support Cost', 0):.2f}\n\n"
+                f"🔗 *Payment Link:*\n{payment_link}\n\n"
+                f"After completing the payment, please use the /done command to verify your payment.\n"
+                f"If you need to cancel this payment process, use the /cancel command."
+            )
+            
+            await update.message.reply_text(message, parse_mode='Markdown')
+            log_message("SENT", chat_id, "", "private", message)
+        else:
+            # Error creating payment link
+            error_message = f"❌ *Error Creating Payment Link*\n\n{result.get('message', 'Unknown error')}"
+            await update.message.reply_text(error_message, parse_mode='Markdown')
+            log_message("SENT", chat_id, "", "private", error_message)
+    
+    except Exception as e:
+        error_message = f"❌ *Error*: {str(e)}"
+        await update.message.reply_text(error_message, parse_mode='Markdown')
+        log_message("SENT", chat_id, "", "private", error_message)
+
+async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /done command to verify a completed payment"""
     # Log the command
     chat_id = update.effective_chat.id
     username = update.effective_user.username if update.effective_user else "unknown"
     chat_type = update.effective_chat.type if update.effective_chat else "private"
-    log_message("RECEIVED", chat_id, username, chat_type, "/cancel_payment")
+    log_message("RECEIVED", chat_id, username, chat_type, "/done")
+    
+    # Get the most recent payment info for this chat ID
+    payment_info = get_payment_info_by_chat_id(chat_id)
+    
+    if not payment_info:
+        message = "❌ *No Payment Found*\n\nNo recent payment link was generated for you. Please use /pay_razer to generate a payment link first."
+        await update.message.reply_text(message, parse_mode='Markdown')
+        log_message("SENT", chat_id, "", "private", message)
+        return
+    
+    # Get payment ID from the saved payment info
+    payment_id = payment_info.get("breakdown", {}).get("payment_id")
+    
+    if not payment_id:
+        message = "❌ *Invalid Payment Data*\n\nCould not find payment ID in your recent payment. Please use /pay_razer to generate a new payment link."
+        await update.message.reply_text(message, parse_mode='Markdown')
+        log_message("SENT", chat_id, "", "private", message)
+        return
+    
+    # Verify payment
+    verification_result = verify_payment_and_update_cycle(payment_id)
+    
+    if verification_result.get("success"):
+        # Payment was successful
+        next_bill_date = verification_result.get("next_bill_date", "Unknown")
+        due_date = verification_result.get("due_date", "Unknown")
+        
+        message = (
+            f"✅ *Payment Confirmed*\n\n"
+            f"Your payment has been verified and your subscription has been extended.\n\n"
+            f"*Next Bill Date:* {next_bill_date}\n"
+            f"*Due Date:* {due_date}\n\n"
+            f"Thank you for your payment!"
+        )
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+        log_message("SENT", chat_id, "", "private", message)
+    else:
+        # Payment verification failed
+        status = verification_result.get("status", {})
+        payment_status = status.get("payment_status", status.get("status", "Unknown"))
+        
+        message = (
+            f"❌ *Payment Not Confirmed*\n\n"
+            f"Your payment could not be verified. Current status: {payment_status}\n\n"
+            f"{verification_result.get('message', '')}\n\n"
+            f"If you have completed the payment, please wait a few minutes and try again."
+        )
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+        log_message("SENT", chat_id, "", "private", message)
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /cancel command to cancel the current payment process"""
+    # Log the command
+    chat_id = update.effective_chat.id
+    username = update.effective_user.username if update.effective_user else "unknown"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    log_message("RECEIVED", chat_id, username, chat_type, "/cancel")
+    
+    # Import razerpay functions (without telegram_bot prefix)
+    from razerpay import clear_customer_details, clear_payment_link_info, get_payment_info_by_chat_id
+    
+    # Check if there's an ongoing payment process either through customer details collection
+    # or an existing payment link
+    is_payment_process_active = notify_users.get(chat_id, {}).get("awaiting_customer_details", False)
+    payment_info = get_payment_info_by_chat_id(chat_id)
+    
+    # Clear any in-memory payment flow state
+    if chat_id in notify_users:
+        notify_users[chat_id]["awaiting_customer_details"] = False
+        notify_users[chat_id].pop("customer_details", None)
+        notify_users[chat_id].pop("missing_fields", None) 
+        notify_users[chat_id].pop("current_field", None)
+    
+    # Clear customer details and payment link info from files
+    clear_customer_details(chat_id)
+    payment_link_cleared = clear_payment_link_info(chat_id)
+    
+    # Always give a positive confirmation to the user
+    message = "✅ Payment process canceled. You can start a new payment by using the /pay\\_razer command when you're ready."
     
     try:
-        # Check if there's an active payment process for this user
-        payment_active = context.user_data.get("awaiting_payment_screenshot", False)
-        
-        if not payment_active:
-            # No active payment process
-            response_message = "❌ No active payment process to cancel. Use /payment_made to start a new payment."
-            await update.message.reply_text(response_message, parse_mode=None)
-            log_message("SENT", chat_id, "", "private", response_message)
-            return
-        
-        # Clear the payment flow state
-        context.user_data.pop("awaiting_payment_screenshot", None)
-        context.user_data.pop("payment_code", None)
-        context.user_data.pop("payment_amount", None)
-        
-        # Clear the payment code in the payment cycle file
-        payment_cycle_file = os.path.join(os.path.dirname(__file__), 'payment_cycle.json')
-        
-        if os.path.exists(payment_cycle_file):
-            try:
-                # Load payment cycle data
-                with open(payment_cycle_file, 'r', encoding='utf-8') as f:
-                    payment_cycle = json.load(f)
-                
-                # Clear current payment code
-                payment_cycle["current_payment_code"] = ""
-                
-                # Save updated payment cycle
-                with open(payment_cycle_file, 'w', encoding='utf-8') as f:
-                    json.dump(payment_cycle, f, indent=2, ensure_ascii=False)
-                    
-                print(f"✅ Cleared payment code for chat_id: {chat_id}")
-            except Exception as e:
-                print(f"❌ Error clearing payment code: {e}")
-        
-        # Send cancellation confirmation - ensuring no markdown characters are used
-        response_message = "✅ Payment Process Cancelled\n\nThe payment process has been cancelled. Use /payment_made to start a new payment."
-        await update.message.reply_text(response_message, parse_mode=None)
-        log_message("SENT", chat_id, "", "private", response_message)
-        
+        await update.message.reply_text(message, parse_mode='Markdown')
+        log_message("SENT", chat_id, "", "private", message)
     except Exception as e:
-        print(f"❌ Error cancelling payment: {e}")
-        # Ensure error message doesn't contain any Markdown formatting characters
-        response_message = f"❌ Error cancelling payment: {str(e)}"
-        await update.message.reply_text(response_message, parse_mode=None)
-        log_message("SENT", chat_id, "", "private", response_message)
+        # If there's an error with Markdown parsing, send without markdown
+        print(f"❌ Error sending cancel confirmation with markdown: {e}")
+        plain_message = "✅ Payment process canceled. You can start a new payment by using the /pay_razer command when you're ready."
+        await update.message.reply_text(plain_message, parse_mode=None)
+        log_message("SENT", chat_id, "", "private", plain_message)
 
 def get_ist_now():
     """Get current datetime in Indian Standard Time (IST)"""
@@ -1493,6 +1254,20 @@ def calculate_due_date(start_date, cycle_days):
     
     return due_date
 
+def calculate_next_bill_due_date(start_date, cycle_days):
+    """Calculate next bill due date (end of cycle + 1 day for grace period)"""
+    ist = pytz.timezone('Asia/Kolkata')
+    if isinstance(start_date, str):
+        start_date = string_to_ist(start_date)
+    
+    # Calculate the next bill date (start + cycle_days)
+    next_bill_date = start_date + timedelta(days=cycle_days)
+    
+    # The next bill due date is 1 day after the next bill date (grace period)
+    next_bill_due_date = next_bill_date + timedelta(days=1)
+    
+    return next_bill_due_date
+
 def calculate_next_bill_date(start_date, cycle_days):
     """Calculate next bill date (start + cycle_days)"""
     if isinstance(start_date, str):
@@ -1522,53 +1297,68 @@ def can_make_payment(last_payment_date, due_date):
 
 def get_payment_status_info():
     """Get current payment status and info message"""
-    payment_cycle_file = os.path.join(os.path.dirname(__file__), 'payment_cycle.json')
-    if not os.path.exists(payment_cycle_file) or os.path.getsize(payment_cycle_file) == 0:
+    payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
+    if not os.path.exists(payments_file) or os.path.getsize(payments_file) == 0:
         return False, "No payment information available"
     
     try:
-        with open(payment_cycle_file, 'r', encoding='utf-8') as f:
-            payment_cycle = json.load(f)
+        with open(payments_file, 'r', encoding='utf-8') as f:
+            payment_data = json.load(f)
         
         # Get payment dates
-        due_date_str = payment_cycle.get("due_date", "")
+        due_date_str = payment_data.get("due_date", "")
+        next_bill_due_date_str = payment_data.get("next_bill_due_date", "")
         
+        # If due_date is missing, we can't determine payment status
         if not due_date_str:
             return False, "No due date available"
+            
+        # If next_bill_due_date is missing, calculate it from due_date (1 day after due date)
+        if not next_bill_due_date_str:
+            due_date = string_to_ist(due_date_str)
+            next_bill_due_date = due_date + timedelta(days=2)  # 2 days after due date (1 day grace period)
+            next_bill_due_date_str = next_bill_due_date.isoformat()
+            
+            # Update payments.json with the calculated next_bill_due_date
+            payment_data["next_bill_due_date"] = next_bill_due_date_str
+            try:
+                with open(payments_file, 'w', encoding='utf-8') as f:
+                    json.dump(payment_data, f, indent=2, ensure_ascii=False)
+                print(f"✅ Added missing next_bill_due_date to payments.json: {next_bill_due_date_str}")
+            except Exception as update_error:
+                print(f"❌ Error updating payments.json: {update_error}")
         
         # Get current date in IST
         today = get_ist_now()
         
         # Convert dates to datetime objects
         due_date = string_to_ist(due_date_str)
-        
-        # Calculate the day after due date (last allowed payment day)
-        day_after_due = due_date + timedelta(days=1)
+        next_bill_due_date = string_to_ist(next_bill_due_date_str)
         
         # Reset time components to compare only dates
         today_date = today.replace(hour=0, minute=0, second=0, microsecond=0).date()
         due_date_only = due_date.replace(hour=0, minute=0, second=0, microsecond=0).date()
-        day_after_due_date = day_after_due.replace(hour=0, minute=0, second=0, microsecond=0).date()
+        next_bill_due_date_only = next_bill_due_date.replace(hour=0, minute=0, second=0, microsecond=0).date();
         
         # Format dates for display
         due_date_display = due_date_only.strftime("%Y-%m-%d")
-        day_after_due_display = day_after_due_date.strftime("%Y-%m-%d")
+        next_bill_due_display = next_bill_due_date_only.strftime("%Y-%m-%d")
         
         # Check payment status
         if today_date < due_date_only:
-            # Before due date
-            days_until = (due_date_only - today_date).days
-            return False, f"🟢 Active - Payment due in {days_until} days (on {due_date_display})"
+            # Before due date - payment not due yet
+            days_remaining = (due_date_only - today_date).days
+            return False, f"🟢 ACTIVE - Payment not due yet. Due on {due_date_display}"
         elif today_date == due_date_only:
-            # On due date
-            return False, f"🟡 Payment Due Today ({due_date_display})"
-        elif today_date == day_after_due_date:
-            # Day after due date (last day to pay)
-            return False, f"🟠 Last Day to Pay (due date was {due_date_display})"
+            # On due date - payment due today
+            return False, f"🟡 DUE TODAY - Payment due today {due_date_display}"
+        elif today_date <= next_bill_due_date_only:
+            # Between due date and next bill due date (grace period)
+            return False, f"🟠 GRACE PERIOD - Payment was due on {due_date_display}, final day to pay: {next_bill_due_display}"
         else:
-            # After day after due date (payment overdue)
-            days_overdue = (today_date - day_after_due_date).days
-            return True, f"🔴 OVERDUE - Payment was due on {due_date_display}, last day to pay was {day_after_due_display}"
+            # After next bill due date (payment overdue)
+            days_overdue = (today_date - next_bill_due_date_only).days
+            return True, f"🔴 OVERDUE - Payment was due on {due_date_display}, overdue by {days_overdue} days"
     except Exception as e:
         print(f"❌ Error getting payment status: {e}")
         return False, "Error checking payment status"
@@ -1576,29 +1366,43 @@ def get_payment_status_info():
 def is_payment_overdue():
     """Check if payment is overdue - returns True if payment is overdue, False otherwise"""
     is_overdue, _ = get_payment_status_info()
+    
+    # If payment is overdue, trigger overdue actions
+    if is_overdue:
+        # Run overdue actions in a separate thread to avoid blocking
+        import threading
+        threading.Thread(target=lambda: asyncio.run(handle_payment_overdue_actions())).start()
+    
     return is_overdue
 
 # List of commands that are always allowed, even when payment is overdue
 ALLOWED_COMMANDS = [
+    "start",
     "help", 
     "payments", 
-    "payment_made",
-    "cancel_payment",
+    "pay_razer",
+    "done",
+    "cancel",
     "total_messages"
 ]
 
 def payment_required(func):
     """Decorator to check if payment is overdue before executing a command"""
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        chat_id = update.effective_chat.id
         command = update.message.text.split()[0][1:] if update.message and update.message.text else ""
         
         # Check if command is in the allowed list
         if command.lower() in ALLOWED_COMMANDS:
             return await func(update, context)
         
+        # Check if user is in the middle of a payment process (awaiting customer details)
+        # In this case, allow the message to pass through even if payment is overdue
+        if notify_users.get(chat_id, {}).get("awaiting_customer_details", False):
+            return await func(update, context)
+        
         # Check if payment is overdue
         if is_payment_overdue():
-            chat_id = update.effective_chat.id
             username = update.effective_user.username if update.effective_user else "unknown"
             chat_type = update.effective_chat.type if update.effective_chat else "private"
             log_message("RECEIVED", chat_id, username, chat_type, update.message.text if update.message else "")
@@ -1607,10 +1411,12 @@ def payment_required(func):
                 "🔒 *Payment Required*\n\n"
                 "Your payment is overdue. Most commands are locked until payment is made.\n\n"
                 "Please use the following commands:\n"
+                "• /start - Basic bot information\n"
                 "• /payments - View payment details\n"
-                "• /payment\\_made - Make a payment\n"
+                "• /pay\\_razer - Make a payment via Razorpay\n"
+                "• /done - Verify payment completion\n"
+                "• /cancel - Cancel an ongoing payment process\n"
                 "• /help - Show available commands\n"
-                "• /cancel\\_payment - Cancel a payment\n"
                 "• /total\\_messages - View message statistics"
             )
             
@@ -1622,13 +1428,117 @@ def payment_required(func):
         return await func(update, context)
     
     return wrapper
+
+async def handle_payment_overdue_actions():
+    """Handle actions when payment is overdue - stop bot, close positions, cancel orders"""
+    try:
+        payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
+        
+        # Read current payment data
+        with open(payments_file, 'r', encoding='utf-8') as f:
+            payment_data = json.load(f)
+        
+        # Check if bot is already force stopped
+        if payment_data.get("bot_force_stopped", False):
+            return
+        
+        # Get current positions and orders from the trading system
+        positions_to_close = []
+        orders_to_cancel = []
+        
+        if SERVER_CALL_AVAILABLE:
+            try:
+                # Get current bot status
+                bot_status = server_call.get_bot_status()
+                
+                # If bot is running, we need to handle positions first
+                if bot_status.get('running', False):
+                    print("🚨 Payment is overdue - initiating bot shutdown process...")
+                    
+                    # Check if there are any open positions
+                    try:
+                        # Import bot state to check current positions
+                        import sys
+                        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+                        from utils.bot_state import get_position, get_active_buy_order, get_active_sell_order
+                        
+                        current_position = get_position()
+                        active_buy = get_active_buy_order()
+                        active_sell = get_active_sell_order()
+                        
+                        # Log current trading state
+                        print(f"Current position: {current_position}")
+                        print(f"Active buy order: {active_buy}")
+                        print(f"Active sell order: {active_sell}")
+                        
+                        # If there are open positions, wait for them to close naturally
+                        if current_position in ["LONG", "SHORT"]:
+                            print(f"⏳ Waiting for {current_position} position to close naturally...")
+                            positions_to_close.append(current_position)
+                        
+                        # If there are active orders, they will be cancelled when bot stops
+                        if active_buy:
+                            orders_to_cancel.append(f"BUY - {active_buy}")
+                        if active_sell:
+                            orders_to_cancel.append(f"SELL - {active_sell}")
+                        
+                    except Exception as e:
+                        print(f"❌ Error checking bot state: {e}")
+                    
+                    # Stop the bot
+                    result = server_call.control_bot_stop()
+                    print(f"🛑 Bot stopped due to payment overdue: {result}")
+                    
+                    # Mark bot as force stopped
+                    payment_data["bot_force_stopped"] = True
+                    payment_data["positions_to_close"] = positions_to_close
+                    payment_data["orders_to_cancel"] = orders_to_cancel
+                    
+                    # Save updated payment data
+                    with open(payments_file, 'w', encoding='utf-8') as f:
+                        json.dump(payment_data, f, indent=2)
+                    
+                    print("🚨 Trading bot stopped due to payment overdue")
+                    print("🔒 All trading commands are now blocked until payment is made")
+                    
+            except Exception as e:
+                print(f"❌ Error handling payment overdue actions: {e}")
+                
+    except Exception as e:
+        print(f"❌ Error in handle_payment_overdue_actions: {e}")
+
+async def handle_payment_restoration():
+    """Handle actions when payment is restored - restart bot if needed"""
+    try:
+        payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
+        
+        # Read current payment data
+        with open(payments_file, 'r', encoding='utf-8') as f:
+            payment_data = json.load(f)
+        
+        # Check if bot was force stopped
+        if payment_data.get("bot_force_stopped", False):
+            # Reset the force stopped flag
+            payment_data["bot_force_stopped"] = False
+            payment_data["positions_to_close"] = []
+            payment_data["orders_to_cancel"] = []
+            
+            # Save updated payment data
+            with open(payments_file, 'w', encoding='utf-8') as f:
+                json.dump(payment_data, f, indent=2)
+            
+            print("✅ Payment restored - bot can be restarted")
+            
+    except Exception as e:
+        print(f"❌ Error in handle_payment_restoration: {e}")
+
 def main():
     """Start the bot"""
     if not BOT_TOKEN:
         print("❌ Error: TELEGRAM_BOT_TOKEN not found in environment variables")
         return
     
-    # Initialize or load payment cycle information
+    # Initialize or load payment_cycle.json file for payment history
     payment_cycle_file = os.path.join(os.path.dirname(__file__), 'payment_cycle.json')
     
     # Initialize or load payments.json file first to get payment_cycle_days
@@ -1636,8 +1546,7 @@ def main():
     if not os.path.exists(payments_file) or os.path.getsize(payments_file) == 0:
         # Create default payments file
         payment_data = {
-            "server_cost": 500,
-            "server_commission": 50,
+            "server_cost": 550,
             "per_message_cost": 1,  # Default value - read from the file
             "message_monthly_cost": 100,
             "support_cost": 100,
@@ -1668,67 +1577,39 @@ def main():
             payment_cycle_days = 28
     
     if not os.path.exists(payment_cycle_file) or os.path.getsize(payment_cycle_file) == 0:
-        # Create default payment cycle file with IST timestamps
-        current_date = get_ist_now()
-        next_bill_date = calculate_next_bill_date(current_date, payment_cycle_days)
-        due_date = calculate_due_date(current_date, payment_cycle_days)
-        
+        # Create default payment_cycle.json with just payment history
         payment_cycle = {
-            "last_payment_date": current_date.isoformat(),
-            "next_bill_date": next_bill_date.isoformat(),
-            "due_date": due_date.isoformat(),
-            "payment_cycle_days": payment_cycle_days,
-            "payment_history": [],
-            "current_payment_code": ""
+            "payment_history": []
         }
         with open(payment_cycle_file, 'w', encoding='utf-8') as f:
             json.dump(payment_cycle, f, indent=2, ensure_ascii=False)
-        print(f"✅ Created payment cycle file with start date: {current_date} and cycle days: {payment_cycle_days}")
+        print(f"✅ Created payment_cycle.json file with empty payment history")
     else:
-        # Payment cycle file exists, check if it needs updates
+        # Payment cycle file exists, check if it has payment_history
         try:
             with open(payment_cycle_file, 'r', encoding='utf-8') as f:
                 payment_cycle = json.load(f)
                 
-            # Ensure the payment cycle has all required fields
-            if not payment_cycle.get("last_payment_date"):
-                payment_cycle["last_payment_date"] = get_ist_now().isoformat()
-            
-            # Handle conversion from old format to new format
-            if "next_payment_date" in payment_cycle and "next_bill_date" not in payment_cycle:
-                payment_cycle["next_bill_date"] = payment_cycle.pop("next_payment_date")
-            
-            if "next_bill_date" not in payment_cycle:
-                last_payment = string_to_ist(payment_cycle["last_payment_date"])
-                payment_cycle["next_bill_date"] = calculate_next_bill_date(last_payment, payment_cycle_days).isoformat()
-            
-            if "due_date" not in payment_cycle:
-                last_payment = string_to_ist(payment_cycle["last_payment_date"])
-                payment_cycle["due_date"] = calculate_due_date(last_payment, payment_cycle_days).isoformat()
-            
-            # Update payment_cycle_days from payments.json
-            if payment_cycle.get("payment_cycle_days") != payment_cycle_days:
-                payment_cycle["payment_cycle_days"] = payment_cycle_days
-                print(f"✅ Updated payment cycle days to: {payment_cycle_days}")
-                
-                # Recalculate due_date and next_bill_date if payment_cycle_days changed
-                last_payment = string_to_ist(payment_cycle["last_payment_date"])
-                payment_cycle["next_bill_date"] = calculate_next_bill_date(last_payment, payment_cycle_days).isoformat()
-                payment_cycle["due_date"] = calculate_due_date(last_payment, payment_cycle_days).isoformat()
-            
             # Ensure payment_history exists
             if "payment_history" not in payment_cycle:
-                payment_cycle["payment_history"] = []
+                payment_cycle = {
+                    "payment_history": []
+                }
+                
+            # Remove any fields that should be in payments.json instead
+            keys_to_remove = ["last_payment_date", "next_bill_date", "due_date", 
+                             "next_bill_due_date", "payment_cycle_days", "positions_to_close", 
+                             "orders_to_cancel", "bot_force_stopped"]
+            for key in keys_to_remove:
+                if key in payment_cycle:
+                    payment_cycle.pop(key)
                 
             with open(payment_cycle_file, 'w', encoding='utf-8') as f:
                 json.dump(payment_cycle, f, indent=2, ensure_ascii=False)
                 
         except Exception as e:
-            print(f"❌ Error initializing payment cycle: {e}")
-                
-        except Exception as e:
-            print(f"❌ Error initializing payment cycle: {e}")
-    
+            print(f"❌ Error initializing payment_cycle.json: {e}")
+            
     # Make sure the QR code directory exists
     qr_dir = os.path.join(os.path.dirname(__file__), 'qr_codes')
     os.makedirs(qr_dir, exist_ok=True)
@@ -1749,7 +1630,7 @@ def main():
     print("💡 Available Commands:")
     print("   /start, /help, /start_bot, /stop_bot, /status")
     print("   /settings, /notify, /stop_notify, /total_messages, /payments")
-    print("   /payment_made, /cancel_payment")
+    print("   /pay_razer, /done")
     print("=" * 50)
     
     # Create the Application with timeouts
@@ -1766,12 +1647,12 @@ def main():
     application.add_handler(CommandHandler("stop_notify", payment_required(stop_notify_command)))
     application.add_handler(CommandHandler("total_messages", payment_required(total_messages_command)))
     application.add_handler(CommandHandler("payments", payments_command))  # Always allowed
-    application.add_handler(CommandHandler("payment_made", payment_made_command))  # Always allowed
-    application.add_handler(CommandHandler("cancel_payment", cancel_payment_command))  # Always allowed
+    application.add_handler(CommandHandler("pay_razer", pay_razer_command))  # Razerpay payment command
+    application.add_handler(CommandHandler("done", done_command))  # Command to verify payment
+    application.add_handler(CommandHandler("cancel", cancel_command))  # Command to cancel payment process
     
     # Add message handler for non-command messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, payment_required(handle_message)))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # Allow photo handling regardless of payment status for payment verification
     
     # Add error handler
     application.add_error_handler(error_handler)
@@ -1784,3 +1665,360 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+def calculate_message_cost_for_cycle():
+    """Calculate the total message cost for the current payment cycle"""
+    try:
+        # Get payment information
+        payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
+        chat_messages_file = os.path.join(os.path.dirname(__file__), 'chat_messages.json')
+        
+        # Load payments data
+        if not os.path.exists(payments_file):
+            print("❌ Payments file not found")
+            return 0
+            
+        with open(payments_file, 'r', encoding='utf-8') as f:
+            payments_data = json.load(f)
+        
+        # Get cycle parameters
+        last_payment_date_str = payments_data.get("last_payment_date", "")
+        next_bill_date_str = payments_data.get("next_bill_date", "")
+        per_message_cost = payments_data.get("per_message_cost", 1)
+        
+        if not last_payment_date_str or not next_bill_date_str:
+            print("❌ Missing payment cycle dates")
+            return 0
+        
+        # Convert dates to datetime objects
+        last_payment_date = string_to_ist(last_payment_date_str)
+        next_bill_date = string_to_ist(next_bill_date_str)
+        
+        # Reset time components to compare only dates
+        cycle_start_date = last_payment_date.replace(hour=0, minute=0, second=0, microsecond=0).date()
+        cycle_end_date = next_bill_date.replace(hour=0, minute=0, second=0, microsecond=0).date()
+        
+        print(f"Calculating message cost from {cycle_start_date} to {cycle_end_date}")
+        
+        # Count all messages for all users in the cycle - since this is for all users
+        cycle_message_count = 0
+        
+        # Use our common function to count messages for all chat IDs
+        try:
+            with open(chat_messages_file, 'r', encoding='utf-8') as f:
+                chat_data = json.load(f)
+            
+            messages = chat_data.get("messages", [])
+            unique_chat_ids = set(str(msg.get("chat_id")) for msg in messages if "chat_id" in msg)
+            
+            # Sum up messages for each chat_id
+            for chat_id in unique_chat_ids:
+                user_messages, _, _, _, _, _ = count_messages_for_date_range(
+                    chat_id, cycle_start_date, cycle_end_date
+                )
+                cycle_message_count += user_messages
+                
+        except Exception as e:
+            print(f"❌ Error counting messages in calculate_message_cost_for_cycle: {e}")
+            # If there's an error with the common function, fall back to simple counting
+            if os.path.exists(chat_messages_file):
+                try:
+                    with open(chat_messages_file, 'r', encoding='utf-8') as f:
+                        chat_data = json.load(f)
+                    
+                    messages = chat_data.get("messages", [])
+                    
+                    # Count messages within the current payment cycle
+                    for message in messages:
+                        try:
+                            if "timestamp" in message:
+                                message_timestamp = string_to_ist(message.get("timestamp", ""))
+                                message_date = message_timestamp.date()
+                            else:
+                                message_date = datetime.strptime(message.get("date", "1970-01-01"), '%Y-%m-%d').date()
+                            
+                            if cycle_start_date <= message_date < cycle_end_date:
+                                cycle_message_count += 1
+                        except (ValueError, TypeError) as e:
+                            print(f"❌ Error processing message date in cost calculation: {e}")
+                            continue
+                except Exception as inner_e:
+                    print(f"❌ Error in fallback message counting: {inner_e}")
+        
+        # Calculate total message cost for the cycle
+        total_message_cost = cycle_message_count * per_message_cost
+        
+        # Update payments.json with the calculated message cost
+        payments_data["message_monthly_cost"] = total_message_cost
+        
+        with open(payments_file, 'w', encoding='utf-8') as f:
+            json.dump(payments_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"✅ Message cost calculated for cycle: {cycle_message_count} messages × ₹{per_message_cost} = ₹{total_message_cost}")
+        return total_message_cost
+        
+    except Exception as e:
+        print(f"❌ Error calculating message cost for cycle: {e}")
+        return 0
+
+def get_total_cycle_cost():
+    """Calculate the total cost for the current payment cycle"""
+    try:
+        # First, calculate and update the message cost
+        message_cost = calculate_message_cost_for_cycle()
+        
+        # Load payments data
+        payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
+        
+        if not os.path.exists(payments_file):
+            print("❌ Payments file not found")
+            return 0
+            
+        with open(payments_file, 'r', encoding='utf-8') as f:
+            payments_data = json.load(f)
+        
+        # Calculate total cost
+        server_cost = payments_data.get("server_cost", 0)
+        support_cost = payments_data.get("support_cost", 0)
+        message_monthly_cost = payments_data.get("message_monthly_cost", 0)
+        
+        total_cost = server_cost + support_cost + message_monthly_cost
+        
+        print(f"📊 Total cycle cost breakdown:")
+        print(f"   Server cost: ₹{server_cost}")
+        print(f"   Support cost: ₹{support_cost}")
+        print(f"   Message cost: ₹{message_monthly_cost}")
+        print(f"   Total: ₹{total_cost}")
+        
+        return total_cost
+        
+    except Exception as e:
+        print(f"❌ Error calculating total cycle cost: {e}")
+        return 0
+
+def ensure_payment_cycle_completeness():
+    """
+    Ensure that payments.json has all required fields.
+    This will add any missing fields needed for proper operation.
+    """
+    try:
+        payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
+        if not os.path.exists(payments_file) or os.path.getsize(payments_file) == 0:
+            print("❌ Payments file not found or empty. Cannot fix.")
+            return False
+            
+        # Load the current payment data
+        with open(payments_file, 'r', encoding='utf-8') as f:
+            payment_data = json.load(f)
+        
+        updated = False
+        
+        # Check for required fields
+        if 'last_payment_date' not in payment_data:
+            # If there's no last payment date, set it to now - payment_cycle_days
+            now = get_ist_now()
+            cycle_days = payment_data.get('payment_cycle_days', 28)
+            last_payment_date = now - timedelta(days=cycle_days)
+            payment_data['last_payment_date'] = last_payment_date.isoformat()
+            updated = True
+            print(f"✅ Added missing last_payment_date to payments: {last_payment_date.isoformat()}")
+        else:
+            # Convert to IST datetime object
+            last_payment_date = string_to_ist(payment_data['last_payment_date'])
+        
+        # Make sure payment_cycle_days exists
+        if 'payment_cycle_days' not in payment_data:
+            payment_data['payment_cycle_days'] = 28
+            updated = True
+            print("✅ Added default payment_cycle_days (28) to payments")
+            
+        cycle_days = payment_data['payment_cycle_days']
+        
+        # Check for due_date and add if missing
+        if 'due_date' not in payment_data:
+            next_bill_date = last_payment_date + timedelta(days=cycle_days)
+            due_date = next_bill_date - timedelta(days=1)
+            payment_data['due_date'] = due_date.isoformat()
+            updated = True
+            print(f"✅ Added missing due_date to payments: {due_date.isoformat()}")
+        
+        # Check for next_bill_date and add if missing
+        if 'next_bill_date' not in payment_data:
+            next_bill_date = last_payment_date + timedelta(days=cycle_days)
+            payment_data['next_bill_date'] = next_bill_date.isoformat()
+            updated = True
+            print(f"✅ Added missing next_bill_date to payments: {next_bill_date.isoformat()}")
+        
+        # Check for next_bill_due_date and add if missing
+        if 'next_bill_due_date' not in payment_data:
+            if 'next_bill_date' in payment_data:
+                next_bill_date = string_to_ist(payment_data['next_bill_date'])
+                next_bill_due_date = next_bill_date + timedelta(days=1)
+                payment_data['next_bill_due_date'] = next_bill_due_date.isoformat()
+                updated = True
+                print(f"✅ Added missing next_bill_due_date to payments: {next_bill_due_date.isoformat()}")
+        
+        # Initialize other required fields
+        if 'positions_to_close' not in payment_data:
+            payment_data['positions_to_close'] = []
+            updated = True
+        
+        if 'orders_to_cancel' not in payment_data:
+            payment_data['orders_to_cancel'] = []
+            updated = True
+            
+        if 'bot_force_stopped' not in payment_data:
+            payment_data['bot_force_stopped'] = False
+            updated = True
+        
+        # Save updates if needed
+        if updated:
+            with open(payments_file, 'w', encoding='utf-8') as f:
+                json.dump(payment_data, f, indent=2, ensure_ascii=False)
+            print("✅ Payments file updated successfully")
+            return True
+            
+        return False
+            
+    except Exception as e:
+        print(f"❌ Error ensuring payment data completeness: {e}")
+        return False
+
+
+# Call this function before using payment cycle
+def main():
+    """Main entry point for the Telegram Bot"""
+    # Initialize payment cycle if needed
+    ensure_payment_cycle_completeness()
+    
+    # Continue with normal initialization
+    try:
+        # Initialize or load payment_cycle.json file for payment history
+        payment_cycle_file = os.path.join(os.path.dirname(__file__), 'payment_cycle.json')
+        
+        # Initialize or load payments.json file first to get payment_cycle_days
+        payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
+        if not os.path.exists(payments_file) or os.path.getsize(payments_file) == 0:
+            # Create default payments file
+            payment_data = {
+                "server_cost": 550,
+                "per_message_cost": 1,  # Default value - read from the file
+                "message_monthly_cost": 100,
+                "support_cost": 100,
+                "payment_cycle_days": 28
+            }
+            with open(payments_file, 'w', encoding='utf-8') as f:
+                json.dump(payment_data, f, indent=2, ensure_ascii=False)
+            print(f"✅ Created payments file with default values")
+            payment_cycle_days = 28
+        else:
+            # Load existing payments file
+            try:
+                with open(payments_file, 'r', encoding='utf-8') as f:
+                    payment_data = json.load(f)
+                
+                # Get payment cycle days
+                payment_cycle_days = payment_data.get("payment_cycle_days", 28)
+                
+                # Add payment_cycle_days if it doesn't exist
+                if "payment_cycle_days" not in payment_data:
+                    payment_data["payment_cycle_days"] = payment_cycle_days
+                    with open(payments_file, 'w', encoding='utf-8') as f:
+                        json.dump(payment_data, f, indent=2, ensure_ascii=False)
+                    print(f"✅ Added payment_cycle_days to payments file")
+                    
+            except Exception as e:
+                print(f"❌ Error updating payment settings: {e}")
+                payment_cycle_days = 28
+        
+        if not os.path.exists(payment_cycle_file) or os.path.getsize(payment_cycle_file) == 0:
+            # Create default payment_cycle.json with just payment history
+            payment_cycle = {
+                "payment_history": []
+            }
+            with open(payment_cycle_file, 'w', encoding='utf-8') as f:
+                json.dump(payment_cycle, f, indent=2, ensure_ascii=False)
+            print(f"✅ Created payment_cycle.json file with empty payment history")
+        else:
+            # Payment cycle file exists, check if it has payment_history
+            try:
+                with open(payment_cycle_file, 'r', encoding='utf-8') as f:
+                    payment_cycle = json.load(f)
+                
+                # Ensure payment_history exists
+                if "payment_history" not in payment_cycle:
+                    payment_cycle = {
+                        "payment_history": []
+                    }
+                
+                # Remove any fields that should be in payments.json instead
+                keys_to_remove = ["last_payment_date", "next_bill_date", "due_date", 
+                                 "next_bill_due_date", "payment_cycle_days", "positions_to_close", 
+                                 "orders_to_cancel", "bot_force_stopped"]
+                for key in keys_to_remove:
+                    if key in payment_cycle:
+                        payment_cycle.pop(key)
+                
+                with open(payment_cycle_file, 'w', encoding='utf-8') as f:
+                    json.dump(payment_cycle, f, indent=2, ensure_ascii=False)
+                
+            except Exception as e:
+                print(f"❌ Error initializing payment_cycle.json: {e}")
+        
+        # Make sure the QR code directory exists
+        qr_dir = os.path.join(os.path.dirname(__file__), 'qr_codes')
+        os.makedirs(qr_dir, exist_ok=True)
+        
+        # Initialize or create temp directory for payment screenshots
+        temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        print("=" * 50)
+        print("🚀 Starting Telegram Trading Bot")
+        print("=" * 50)
+        print(f"🤖 Bot Token: {'✅ Set' if BOT_TOKEN else '❌ Missing'}")
+        print(f"🔧 Server Call: {'✅ Available' if SERVER_CALL_AVAILABLE else '❌ Not Available'}")
+        print("=" * 50)
+        print("💡 All files and logs are stored in telegram_bot folder")
+        print("💡 This bot communicates with the trading bot via the server_call interface")
+        print("=" * 50)
+        print("💡 Available Commands:")
+        print("   /start, /help, /start_bot, /stop_bot, /status")
+        print("   /settings, /notify, /stop_notify, /total_messages, /payments")
+        print("   /pay_razer, /done")
+        print("=" * 50)
+        
+        # Create the Application with timeouts
+        application = Application.builder().token(BOT_TOKEN).read_timeout(30).write_timeout(30).connect_timeout(30).build()
+        
+        # Add command handlers - apply payment_required decorator to commands that should be blocked when payment is overdue
+        application.add_handler(CommandHandler("start", payment_required(start_command)))
+        application.add_handler(CommandHandler("help", help_command))  # Always allowed
+        application.add_handler(CommandHandler("start_bot", payment_required(start_bot_command)))
+        application.add_handler(CommandHandler("stop_bot", payment_required(stop_bot_command)))
+        application.add_handler(CommandHandler("status", payment_required(status_command)))
+        application.add_handler(CommandHandler("settings", payment_required(settings_command)))
+        application.add_handler(CommandHandler("notify", payment_required(notify_command)))
+        application.add_handler(CommandHandler("stop_notify", payment_required(stop_notify_command)))
+        application.add_handler(CommandHandler("total_messages", payment_required(total_messages_command)))
+        application.add_handler(CommandHandler("payments", payments_command))  # Always allowed
+        application.add_handler(CommandHandler("pay_razer", pay_razer_command))  # Razerpay payment command
+        application.add_handler(CommandHandler("done", done_command))  # Command to verify payment
+        application.add_handler(CommandHandler("cancel", cancel_command))  # Command to cancel payment process
+        
+        # Add message handler for non-command messages
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, payment_required(handle_message)))
+        
+        # Add error handler
+        application.add_error_handler(error_handler)
+        
+        print("🚀 Bot is starting...")
+        print("💡 Send /start to begin!")
+        
+        # Run the bot
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        
+        # Calculate the message cost for the current cycle
+        calculate_message_cost_for_cycle()
+    except Exception as e:
+        print(f"❌ Error in main initialization: {e}")
