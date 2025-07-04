@@ -4,7 +4,8 @@ This bot is an automated trading system for Binance Futures, written in Python. 
 
 ### Key Features
 
-- **Automated Long/Short Orders**: Places and manages long and short futures orders automatically, using a configurable quantity.
+- **Automated Long/Short Orders**: Places and manages long and short futures orders automatically, using either a fixed quantity or percentage of available balance.
+- **Percentage-Based Trading**: Option to trade with a percentage of your available balance instead of a fixed quantity, providing better risk management.
 - **Heikin Ashi Strategy**: Uses Heikin Ashi candles to calculate buy/sell signals, entering trades at HA_High + offset (for buys) and exiting/stop loss at HA_Low - offset (for sells).
 - **Stateful Order Management**: Tracks open and filled orders, manages position state (NONE, LONG, SHORT, etc.), and logs filled order details.
 - **Balance Checking**: Can check and display your futures account balance and trading status (live or test mode).
@@ -21,3 +22,15 @@ This bot is an automated trading system for Binance Futures, written in Python. 
 4. **Manages open orders** (cancels, updates, or waits for fill as needed).
 5. **Tracks trading state** (active position, filled prices, order status).
 6. **Logs results** to order_book.json for reference.
+
+### Trading Configuration
+
+The bot's trading behavior can be configured in the `api/trading_config.json` file:
+
+- `symbol_name`: The trading pair (e.g., "ETHUSDT")
+- `quantity_type`: Trading quantity mode ("fixed" or "percentage")
+- `quantity`: Fixed quantity when using fixed mode
+- `quantity_percentage`: Percentage of available balance to use when in percentage mode (1-100)
+- `sell_long_offset`: Price offset for sell/stop orders
+- `buy_long_offset`: Price offset for buy orders
+- `candle_interval`: Candlestick interval (e.g., "1m", "5m", "15m")
