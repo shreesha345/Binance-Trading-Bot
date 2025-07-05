@@ -226,16 +226,29 @@ def create_payment_link_with_breakdown(
     message_monthly_cost = pricing_data.get("message_monthly_cost", 0)
     support_cost = pricing_data.get("support_cost", 0)
 
-    total_amount = server_cost + message_monthly_cost + support_cost
-    amount_in_paisa = total_amount * 100
+    # Calculate base amount
+    base_amount = server_cost + message_monthly_cost + support_cost
+    
+    # Calculate additional charges
+    processing_fee = base_amount * 0.02  # 2% processing fee
+    gst_on_processing_fee = processing_fee * 0.18  # 18% GST on the processing fee only
+    additional_charges = 200  # Fixed additional charges
+    
+    # Calculate final total
+    total_amount = base_amount + processing_fee + gst_on_processing_fee + additional_charges
+    amount_in_paisa = int(total_amount * 100)
 
     # Prepare detailed breakdown
     breakdown = {
         "Server Cost": server_cost,
         "Message Monthly Cost": message_monthly_cost,
         "Support Cost": support_cost,
-        "Total": total_amount,
-        "amount": total_amount
+        "Base Amount": base_amount,
+        "Processing Fee (2%)": round(processing_fee, 2),
+        "GST on Processing Fee (18%)": round(gst_on_processing_fee, 2),
+        "Additional Charges": additional_charges,
+        "Total": round(total_amount, 2),
+        "amount": round(total_amount, 2)
     }
 
     # Prepare Razorpay payload
@@ -246,6 +259,10 @@ def create_payment_link_with_breakdown(
         f"SERVER      : ₹{server_cost}",
         f"MESSAGING   : ₹{message_monthly_cost}",
         f"SUPPORT     : ₹{support_cost}",
+        f"BASE AMOUNT : ₹{base_amount}",
+        f"PROC FEE(2%): ₹{round(processing_fee, 2)}",
+        f"GST ON FEE  : ₹{round(gst_on_processing_fee, 2)}",
+        f"ADDITIONAL  : ₹{additional_charges}",
     ]
     compact_description = "TELEGRAM BOT SERVICES\n" + "\n".join(description_lines)
 
@@ -260,7 +277,12 @@ def create_payment_link_with_breakdown(
         "notes": {
             "Server Cost": f"₹{server_cost}",
             "Messaging": f"₹{message_monthly_cost}",
-            "Support": f"₹{support_cost}"
+            "Support": f"₹{support_cost}",
+            "Base Amount": f"₹{base_amount}",
+            "Processing Fee": f"₹{round(processing_fee, 2)}",
+            "GST on Processing Fee": f"₹{round(gst_on_processing_fee, 2)}",
+            "Additional Charges": f"₹{additional_charges}",
+            "Total": f"₹{round(total_amount, 2)}"
         }
     }
 
@@ -294,7 +316,7 @@ def create_payment_link_with_breakdown(
             return {
                 "status": "success",
                 "payment_link": data["short_url"],
-                "amount": total_amount,
+                "amount": round(total_amount, 2),
                 "breakdown": breakdown
             }
         else:
