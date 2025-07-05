@@ -8,6 +8,6 @@
     "buy_long_offset": "1",
     "quantity": "1",
     "quantity_type": "percentage",
-    "quantity_percentage": "1",
-    "candle_interval": "15m"
+    "quantity_percentage": "5",
+    "candle_interval": "1m"
 }
