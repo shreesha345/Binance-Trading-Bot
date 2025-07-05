@@ -964,10 +964,13 @@ async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Format payment dates for display
             last_payment_display = last_payment_date.strftime("%Y-%m-%d")
             due_date_display = due_date.strftime("%Y-%m-%d")
-            
-            # Calculate total cost (including message cost for this cycle)
-            total_overall_cost = server_cost + message_monthly_cost + support_cost
-            
+              # Calculate total cost (including message cost for this cycle)
+            base_amount = server_cost + message_monthly_cost + support_cost
+            processing_fee = base_amount * 0.02  # 2% processing fee
+            gst_on_processing_fee = processing_fee * 0.18  # 18% GST on processing fee
+            additional_charges = 200  # Fixed additional charges
+            total_overall_cost = base_amount + processing_fee + gst_on_processing_fee + additional_charges
+
             # Format response with emojis and message usage information
             response_message = (
                 "💰 *Payment Details* 💰\n\n"
@@ -979,6 +982,11 @@ async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"  • Total Message Cost: ₹{message_monthly_cost:.2f}\n\n"
                 f"👨‍💻 *Support*\n"
                 f"  • Support Cost: ₹{support_cost:.2f}\n\n"
+                f"💳 *Payment Charges*\n"
+                f"  • Base Amount: ₹{base_amount:.2f}\n"
+                f"  • Processing Fee (2%): ₹{processing_fee:.2f}\n"
+                f"  • GST on Processing Fee (18%): ₹{gst_on_processing_fee:.2f}\n"
+                f"  • Additional Charges: ₹{additional_charges:.2f}\n\n"
                 f"📆 *Payment Cycle*\n"
                 f"  • Last Payment: {last_payment_display}\n"
                 f"  • Payment Due Date: {due_date_display}\n"
@@ -1095,7 +1103,11 @@ async def pay_razer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"*Breakdown:*\n"
                 f"• Server Cost: ₹{breakdown.get('Server Cost', 0):.2f}\n"
                 f"• Message Cost: ₹{breakdown.get('Message Monthly Cost', 0):.2f}\n"
-                f"• Support Cost: ₹{breakdown.get('Support Cost', 0):.2f}\n\n"
+                f"• Support Cost: ₹{breakdown.get('Support Cost', 0):.2f}\n"
+                f"• Base Amount: ₹{breakdown.get('Base Amount', 0):.2f}\n"
+                f"• Processing Fee (2%): ₹{breakdown.get('Processing Fee (2%)', 0):.2f}\n"
+                f"• GST on Processing Fee (18%): ₹{breakdown.get('GST on Processing Fee (18%)', 0):.2f}\n"
+                f"• Additional Charges: ₹{breakdown.get('Additional Charges', 0):.2f}\n\n"
                 f"🔗 *Payment Link:*\n{payment_link}\n\n"
                 f"After completing the payment, please use the /done command to verify your payment.\n"
                 f"If you need to cancel this payment process, use the /cancel command."
