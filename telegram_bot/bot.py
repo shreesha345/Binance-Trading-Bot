@@ -1383,7 +1383,8 @@ ALLOWED_COMMANDS = [
     "pay_razer",
     "done",
     "cancel",
-    "total_messages"
+    "total_messages",
+    "stop_bot"  # Allow users to stop the bot even when payment is overdue
 ]
 
 def payment_required(func):

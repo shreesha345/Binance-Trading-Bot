@@ -1,22 +1,21 @@
-
-FROM ubuntu:24.04
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && \
-    apt-get install -y python3 python3-pip python3-venv && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
 
-COPY ../pyproject.toml pyproject.toml
-COPY ../uv.lock uv.lock
-COPY ../ .
+# Copy pyproject.toml and uv.lock for dependency installation
+COPY pyproject.toml ./
+COPY uv.lock ./
 
-# Remove any existing .venv directory that might be corrupted
-RUN rm -rf .venv
+# Install dependencies only (not the project itself)
+RUN uv sync --locked --no-install-project
 
-RUN pip3 install uv --break-system-packages
-RUN uv sync
+# Copy the rest of the application
+COPY . .
+
+# Install the project itself
+RUN uv sync --locked
+
+# Place executables in the environment at the front of the path
+ENV PATH="/app/.venv/bin:$PATH"
 
 CMD ["uv", "run", "telegram_bot/bot.py"]
