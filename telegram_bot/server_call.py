@@ -191,3 +191,31 @@ def get_latest_update():
         return {"filled_orders": latest}
     else:
         raise Exception(f"Failed to get latest update: {response.text}")
+
+def get_pnl_analysis(start_date=None, end_date=None, days=30):
+    """
+    Get PnL analysis for a specific date range or number of days
+    
+    Args:
+        start_date (str, optional): Start date in YYYY-MM-DD format
+        end_date (str, optional): End date in YYYY-MM-DD format
+        days (int, optional): Number of days to look back (default: 30)
+        
+    Returns:
+        dict: PnL analysis data
+    """
+    url = f"{base_url}/pnl/analyze"
+    data = {
+        "days": days
+    }
+    
+    if start_date and end_date:
+        data["start_date"] = start_date
+        data["end_date"] = end_date
+    
+    response = requests.post(url, json=data)
+    
+    if response.status_code == 200:
+        return response.json()
+    else:
+        raise Exception(f"Failed to get PnL analysis: {response.text}")

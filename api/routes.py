@@ -10,6 +10,10 @@ from typing import Optional, Any, Dict
 from pydantic import Field
 import base64
 import tempfile
+# Add PnL analyzer imports
+from utils.pnl_analyzer import BinanceFuturesPnLTracker
+from utils.config import BINANCE_API_KEY, BINANCE_API_SECRET, TEST
+from datetime import datetime
 
 router = APIRouter()
 
@@ -207,3 +211,60 @@ def get_trading_config():
         except Exception:
             return JSONResponse(content={"error": "Invalid JSON in trading_config.json"}, status_code=500)
     return config
+
+class PnLAnalysisRequest(BaseModel):
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    days: Optional[int] = 30
+
+@router.post("/pnl/analyze")
+def analyze_pnl(req: PnLAnalysisRequest):
+    """
+    Analyze PnL for a specific date range or number of days.
+    Does not save data to a JSON file - only returns the data for display.
+    """
+    try:
+        tracker = BinanceFuturesPnLTracker(BINANCE_API_KEY, BINANCE_API_SECRET, testnet=TEST)
+        
+        # Validate date inputs if provided
+        if (req.start_date and not req.end_date) or (not req.start_date and req.end_date):
+            log_api("Error: Both start_date and end_date must be provided together.")
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Both start_date and end_date must be provided together."}
+            )
+        
+        # Get trading stats
+        stats = tracker.get_trading_stats(
+            days=req.days,
+            start_date=req.start_date,
+            end_date=req.end_date
+        )
+        
+        # Get daily PnL breakdown
+        daily_pnl = tracker.get_daily_pnl(
+            days=req.days if not req.start_date else req.days,
+            start_date=req.start_date,
+            end_date=req.end_date
+        )
+        
+        # Convert DataFrame to dict for JSON serialization
+        daily_pnl_dict = {}
+        if not daily_pnl.empty:
+            daily_pnl_dict = daily_pnl.reset_index().to_dict(orient='records')
+        
+        response_data = {
+            "trading_stats": stats,
+            "daily_pnl": daily_pnl_dict,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        log_api(f"PnL analysis completed for period: {req.start_date or f'Last {req.days} days'} to {req.end_date or 'now'}")
+        return response_data
+        
+    except Exception as e:
+        log_api(f"Error analyzing PnL: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to analyze PnL: {str(e)}"}
+        )
