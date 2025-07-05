@@ -6,6 +6,11 @@ from requests.auth import HTTPBasicAuth
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import pytz
+import sys
+
+# Add parent directory to path to allow imports from utils package
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utils.config import MODE_ENV  # Import MODE_ENV from config.py
 
 # Define path for customer details file
 CUSTOMER_DETAILS_FILE = os.path.join(os.path.dirname(__file__), 'customer_details.json')
@@ -208,8 +213,14 @@ def create_payment_link_with_breakdown(
     Creates a Razorpay payment link and returns detailed pricing breakdown.
     """
     load_dotenv()
-    api_key = os.getenv("RAZORPAY_API_KEY")
-    api_secret = os.getenv("RAZORPAY_API_SECRET")
+    
+    # Use test keys if MODE is 'test', live keys otherwise
+    if MODE_ENV in ['test', 'true']:
+        api_key = os.getenv("RAZORPAY_TEST_API_KEY")
+        api_secret = os.getenv("RAZORPAY_TEST_API_SECRET")
+    else:
+        api_key = os.getenv("RAZORPAY_API_KEY")
+        api_secret = os.getenv("RAZORPAY_API_SECRET")
 
     if not api_key or not api_secret:
         return {"status": "error", "message": "Missing Razorpay API credentials"}
@@ -336,8 +347,13 @@ def check_payment_status(payment_link_id):
     url = f"https://api.razorpay.com/v1/payment_links/{payment_link_id}"
 
     load_dotenv()
-    api_key = os.getenv("RAZORPAY_API_KEY")
-    api_secret = os.getenv("RAZORPAY_API_SECRET")
+    # Use test keys if MODE is 'test', live keys otherwise
+    if MODE_ENV in ['test', 'true']:
+        api_key = os.getenv("RAZORPAY_TEST_API_KEY")
+        api_secret = os.getenv("RAZORPAY_TEST_API_SECRET")
+    else:
+        api_key = os.getenv("RAZORPAY_API_KEY")
+        api_secret = os.getenv("RAZORPAY_API_SECRET")
 
     if not api_key or not api_secret:
         return {"status": "error", "message": "Missing Razorpay API credentials"}
