@@ -1545,18 +1545,30 @@ def main():
     # Initialize or load payments.json file first to get payment_cycle_days
     payments_file = os.path.join(os.path.dirname(__file__), 'payments.json')
     if not os.path.exists(payments_file) or os.path.getsize(payments_file) == 0:
-        # Create default payments file
+        # Create default payments file with dates starting from today
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        payment_cycle_days = 28
+        
+        # Calculate the dates based on current date
+        due_date = now + timedelta(days=payment_cycle_days - 1)  # Due date is 1 day before next bill
+        next_bill_date = now + timedelta(days=payment_cycle_days)  # Next bill is payment_cycle_days from now
+        next_bill_due_date = next_bill_date + timedelta(days=1)  # Grace period is 1 day after next bill
+        
         payment_data = {
-            "server_cost": 550,
+            "server_cost": 4000,
             "per_message_cost": 1,  # Default value - read from the file
-            "message_monthly_cost": 100,
-            "support_cost": 100,
-            "payment_cycle_days": 28
+            "message_monthly_cost": 0,
+            "support_cost": 2000,
+            "payment_cycle_days": payment_cycle_days,
+            "last_payment_date": now.isoformat(),  # Set today as the last payment date
+            "due_date": due_date.isoformat(),
+            "next_bill_date": next_bill_date.isoformat(),
+            "next_bill_due_date": next_bill_due_date.isoformat()
         }
         with open(payments_file, 'w', encoding='utf-8') as f:
             json.dump(payment_data, f, indent=2, ensure_ascii=False)
-        print(f"✅ Created payments file with default values")
-        payment_cycle_days = 28
+        print(f"✅ Created payments file with default values and dates starting from today")
     else:
         # Load existing payments file
         try:
@@ -1572,6 +1584,39 @@ def main():
                 with open(payments_file, 'w', encoding='utf-8') as f:
                     json.dump(payment_data, f, indent=2, ensure_ascii=False)
                 print(f"✅ Added payment_cycle_days to payments file")
+            
+            # Check if date fields exist, add them if not
+            ist = pytz.timezone('Asia/Kolkata')
+            now = datetime.now(ist)
+            update_needed = False
+            
+            # Check and add date fields if missing
+            date_fields_missing = ("due_date" not in payment_data or 
+                                  "next_bill_date" not in payment_data or 
+                                  "next_bill_due_date" not in payment_data or
+                                  "last_payment_date" not in payment_data)
+                
+            if date_fields_missing:
+                # If last_payment_date is missing but other dates exist, use now - payment_cycle_days
+                if "last_payment_date" not in payment_data and ("due_date" in payment_data or "next_bill_date" in payment_data):
+                    payment_data["last_payment_date"] = (now - timedelta(days=payment_cycle_days)).isoformat()
+                # If all dates are missing, set everything based on current date
+                else:
+                    payment_data["last_payment_date"] = now.isoformat()
+                    due_date = now + timedelta(days=payment_cycle_days - 1)
+                    next_bill_date = now + timedelta(days=payment_cycle_days)
+                    next_bill_due_date = next_bill_date + timedelta(days=1)
+                    
+                    payment_data["due_date"] = due_date.isoformat()
+                    payment_data["next_bill_date"] = next_bill_date.isoformat()
+                    payment_data["next_bill_due_date"] = next_bill_due_date.isoformat()
+                
+                update_needed = True
+                
+            if update_needed:
+                with open(payments_file, 'w', encoding='utf-8') as f:
+                    json.dump(payment_data, f, indent=2, ensure_ascii=False)
+                print(f"✅ Updated payment dates in payments file")
                 
         except Exception as e:
             print(f"❌ Error updating payment settings: {e}")
@@ -1902,10 +1947,10 @@ def main():
         if not os.path.exists(payments_file) or os.path.getsize(payments_file) == 0:
             # Create default payments file
             payment_data = {
-                "server_cost": 550,
+                "server_cost": 4000,
                 "per_message_cost": 1,  # Default value - read from the file
-                "message_monthly_cost": 100,
-                "support_cost": 100,
+                "message_monthly_cost": 0,
+                "support_cost": 2000,
                 "payment_cycle_days": 28
             }
             with open(payments_file, 'w', encoding='utf-8') as f:

@@ -391,20 +391,39 @@ def verify_payment_and_update_cycle(payment_link_id):
             # Update payment information
             ist = pytz.timezone('Asia/Kolkata')
             now = datetime.now(ist)
-            payment_data['last_payment_date'] = now.isoformat()
+            
+            # Get current due date if it exists
+            old_due_date_str = payment_data.get('due_date', '')
+            old_due_date = None
+            payment_date_to_use = now  # Default to actual payment date
+            
+            # Check if we need to use the due date instead of actual payment date
+            if old_due_date_str:
+                try:
+                    old_due_date = datetime.fromisoformat(old_due_date_str)
+                    
+                    # If the payment is being made after the due date (in grace period or overdue)
+                    # Use the due date as the last payment date instead of actual payment date
+                    if now.date() > old_due_date.date():
+                        print(f"Payment made after due date. Using due date {old_due_date.date()} as reference instead of actual payment date {now.date()}")
+                        payment_date_to_use = old_due_date
+                except Exception as date_error:
+                    print(f"Error parsing old due date: {date_error}")
+            
+            # Use the appropriate date as the last payment date
+            payment_data['last_payment_date'] = payment_date_to_use.isoformat()
             payment_data['first_payment_made'] = True
             payment_data['reminder_sent'] = False
             
             # Get payment cycle days (default 28 if not specified)
             payment_cycle_days = payment_data.get('payment_cycle_days', 28)
             
-            # Calculate next bill date from the payment date (not from the original due date)
-            # This ensures full payment cycle length regardless of when payment was made
-            next_bill_date = now + timedelta(days=payment_cycle_days)
+            # Calculate next bill date from the reference payment date
+            # This ensures consistent billing cycle when payments are late
+            next_bill_date = payment_date_to_use + timedelta(days=payment_cycle_days)
             payment_data['next_bill_date'] = next_bill_date.isoformat()
             
             # Calculate due date (1 day before the next bill date)
-            # This gives users until the day before the next bill is due
             due_date = next_bill_date - timedelta(days=1)
             payment_data['due_date'] = due_date.isoformat()
             
@@ -507,6 +526,8 @@ def is_payment_allowed(chat_id=None):
             else:
                 return (True, f"Payment is due (overdue by {days_overdue} days)")
         else:
+            days_until_due = (due_date_only - current_date_only).days
+            return (False, f"Payment is not due yet. {days_until_due} days remaining until due date ({due_date_only.strftime('%Y-%m-%d')})")
             days_until_due = (due_date_only - current_date_only).days
             return (False, f"Payment is not due yet. {days_until_due} days remaining until due date ({due_date_only.strftime('%Y-%m-%d')})")
     
