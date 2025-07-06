@@ -186,8 +186,8 @@ The subscription system operates on a configurable payment cycle:
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/binance-trading-bot.git
-   cd binance-trading-bot
+   git clone https://github.com/shreesha345/Binance-Trading-Bot.git
+   cd Binance-Trading-Bot
    ```
 
 2. Create a virtual environment and install dependencies:
