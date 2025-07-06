@@ -66,6 +66,8 @@ with open(TRADING_CONFIG_PATH, 'r') as f:
 QUANTITY_TYPE = trading_config.get('quantity_type', 'fixed')
 FIXED_QUANTITY = float(trading_config.get('quantity', os.getenv('QUANTITY', '0.01')))
 QUANTITY_PERCENTAGE = float(trading_config.get('quantity_percentage', '10'))
+PRICE_VALUE = float(trading_config.get('price_value', '10'))  # Default to 10 USDT
+LEVERAGE = int(trading_config.get('leverage', '1'))  # Default to 1x leverage
 TRADING_SYMBOL = trading_config.get('symbol_name')
 SELL_OFFSET = float(trading_config.get('sell_long_offset', 0))
 BUY_OFFSET = float(trading_config.get('buy_long_offset', 0))

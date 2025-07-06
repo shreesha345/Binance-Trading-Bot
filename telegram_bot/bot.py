@@ -378,8 +378,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ /done - Verify completed payment\n"
         "❌ /cancel - Cancel payment process\n\n"
         "📝 *Settings Format:*\n"
-        "`interval,symbol,quantity,buy_long_offset,sell_long_offset`\n"
-        "Example: `1m,BTCUSDT,0.01,10,10`\n\n"
+        "`interval,symbol,quantity,buy_long_offset,sell_long_offset,leverage`\n\n"
         "⚠️ *Payment System:*\n"
         "• Payment is due on the specified due date\n"
         "• Payments can only be made on or after the due date\n"
@@ -505,10 +504,41 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response_message = "❌ Trading bot service is not available. Please check server connection."
     else:
         try:
-            result = server_call.get_bot_status()
-            is_running = result.get('running', False)
+            # Get bot running status
+            status_result = server_call.get_bot_status()
+            is_running = status_result.get('running', False)
             status_emoji = "🟢" if is_running else "🔴"
-            response_message = f"{status_emoji} *Bot Status*\nRunning: {'Yes' if is_running else 'No'}"
+            
+            # Get trading configuration
+            config_result = server_call.get_trading_config()
+            
+            # Format configuration details
+            symbol = config_result.get('symbol_name', 'Unknown')
+            candle_interval = config_result.get('candle_interval', 'Unknown')
+            buy_offset = config_result.get('buy_long_offset', 'Unknown')
+            sell_offset = config_result.get('sell_long_offset', 'Unknown')
+            quantity_type = config_result.get('quantity_type', 'fixed')
+            leverage = config_result.get('leverage', '1')
+            
+            # Display quantity based on type
+            if quantity_type == 'percentage':
+                quantity = f"{config_result.get('quantity_percentage', '0')}% of balance"
+            elif quantity_type == 'price':
+                quantity = f"${config_result.get('price_value', '0')} USDT value"
+            else:
+                quantity = config_result.get('quantity', '0')
+                
+            response_message = (
+                f"{status_emoji} *Bot Status*\n"
+                f"Running: {'Yes' if is_running else 'No'}\n\n"
+                f"📊 *Current Configuration*\n"
+                f"Symbol: {symbol}\n"
+                f"Candle Interval: {candle_interval}\n"
+                f"Quantity: {quantity}\n"
+                f"Buy Offset: {buy_offset}\n"
+                f"Sell Offset: {sell_offset}\n"
+                f"Leverage: {leverage}x\n"
+            )
         except Exception as e:
             print(f"❌ Error getting bot status: {e}")
             response_message = f"❌ Error getting bot status: {str(e)}"
@@ -527,18 +557,23 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response_message = (
         "⚙️ *Trading Settings Configuration*\n\n"
         "Please send your settings in the following format:\n"
-        "`candle_interval,symbol,quantity,buy_long_offset,sell_long_offset`\n\n"
-        "📝 Example:\n"
-        "`1m,BTCUSDT,0.01,10,10`\n\n"
-        "📊 *Percentage-Based Trading:*\n"
-        "Add % to quantity for percentage of balance (e.g., `5%` to use 5% of available balance)\n"
-        "`1m,BTCUSDT,5%,10,10`\n\n"
+        "`candle_interval,symbol,quantity_spec,buy_long_offset,sell_long_offset,leverage`\n\n"
+        "📝 *Examples:*\n\n"
+        "📊 *Fixed Quantity:*\n"
+        "`1m,BTCUSDT,0.01,10,10,1`\n\n"
+        "� *Percentage-Based Trading:*\n"
+        "Add % to use percentage of balance\n"
+        "`1m,BTCUSDT,5%,10,10,3`\n\n"
+        "💵 *Price-Based Trading:*\n"
+        "Add $ to use fixed USDT amount\n"
+        "`1m,BTCUSDT,10$,10,10,5`\n\n"
         "Where:\n"
         "• Candle Interval: e.g., 1m, 5m, 1h\n"
         "• Symbol: Trading pair (e.g., BTCUSDT)\n"
-        "• Quantity: Trade amount (fixed or percentage with %)\n"
+        "• Quantity: Fixed amount, percentage (%) of balance, or USDT amount ($)\n"
         "• Buy offset: Price offset for buy orders\n"
-        "• Sell offset: Price offset for sell orders"
+        "• Sell offset: Price offset for sell orders\n"
+        "• Leverage: Trading leverage (1-125 depending on asset)"
     )
 
     # Initialize user state if not exists
@@ -655,18 +690,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             try:
                 parts = [x.strip() for x in message_text.split(",")]
-                if len(parts) != 5:
-                    raise ValueError("Please provide exactly 5 values: candle_interval,symbol,quantity,buy_long_offset,sell_long_offset")
+                if len(parts) != 6:
+                    raise ValueError("Please provide exactly 6 values: candle_interval,symbol,quantity_spec,buy_long_offset,sell_long_offset,leverage")
 
-                candle_interval, symbol, quantity, buy_long_offset, sell_long_offset = parts
+                candle_interval, symbol, quantity_spec, buy_long_offset, sell_long_offset, leverage = parts
+                
+                # Set default values
+                quantity_type = "fixed"
+                quantity = quantity_spec
+                quantity_percentage = "10"  # Default value
+                price_value = "10"  # Default value
                 
                 # Check if quantity is percentage-based (ends with %)
-                quantity_type = "fixed"
-                quantity_percentage = "10"  # Default value
-                if quantity.endswith('%'):
+                if quantity_spec.endswith('%'):
                     quantity_type = "percentage"
-                    quantity_percentage = quantity.rstrip('%')
+                    quantity_percentage = quantity_spec.rstrip('%')
                     quantity = "1"  # Set a default fallback value for fixed quantity
+                # Check if quantity is price-based (ends with $)
+                elif quantity_spec.endswith('$'):
+                    quantity_type = "price"
+                    price_value = quantity_spec.rstrip('$')
+                    quantity = "1"  # Set a default fallback value for fixed quantity
+                    # Add minimum notional check for price-based orders
+                    if float(price_value) < 20:
+                        response_message = (
+                            f"❌ *Invalid Amount*\nBinance requires a minimum notional of 20 USDT per order. "
+                            f"You entered: {price_value}$\nPlease enter a value of 20 or higher."
+                        )
+                        await update.message.reply_text(response_message, parse_mode='Markdown')
+                        notify_users[chat_id]["awaiting_settings"] = False
+                        return
                 
                 # Use update_trading_config to add all the data in a single API call
                 result = server_call.update_trading_config(
@@ -676,11 +729,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     buy_long_offset=buy_long_offset,
                     sell_long_offset=sell_long_offset,
                     quantity_type=quantity_type,
-                    quantity_percentage=quantity_percentage
+                    quantity_percentage=quantity_percentage,
+                    price_value=price_value,
+                    leverage=leverage
                 )
                 
                 # Set display value based on quantity type
-                quantity_display = f"{quantity_percentage}% of balance" if quantity_type == "percentage" else quantity
+                if quantity_type == "percentage":
+                    quantity_display = f"{quantity_percentage}% of balance"
+                elif quantity_type == "price":
+                    quantity_display = f"${price_value} USDT value"
+                else:
+                    quantity_display = quantity
 
                 response_message = (
                     f"✅ *Settings Updated Successfully*\n\n"
@@ -688,14 +748,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"*Symbol:* {symbol}\n"
                     f"*Quantity:* {quantity_display}\n"
                     f"*Buy Offset:* {buy_long_offset}\n"
-                    f"*Sell Offset:* {sell_long_offset}\n\n"
+                    f"*Sell Offset:* {sell_long_offset}\n"
+                    f"*Leverage:* {leverage}x\n\n"
                 )
                 notify_users[chat_id]["awaiting_settings"] = False
 
             except ValueError as ve:
                 response_message = (
                     f"❌ *Invalid Format*\n{str(ve)}\n\n"
-                    "Please try again with: candle_interval,symbol,quantity,buy_long_offset,sell_long_offset"
+                    "Please try again with: candle_interval,symbol,quantity_spec,buy_long_offset,sell_long_offset,leverage"
                 )
             except Exception as e:
                 print(f"❌ Error updating settings: {e}")

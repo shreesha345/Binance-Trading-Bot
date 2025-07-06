@@ -7,7 +7,9 @@
     "sell_long_offset": "1",
     "buy_long_offset": "1",
     "quantity": "1",
-    "quantity_type": "percentage",
-    "quantity_percentage": "5",
+    "quantity_type": "price",
+    "quantity_percentage": "10",
+    "price_value": "30",
+    "leverage": "5",
     "candle_interval": "1m"
 }
