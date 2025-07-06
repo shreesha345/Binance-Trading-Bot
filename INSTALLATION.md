@@ -17,8 +17,8 @@ This guide provides detailed instructions for setting up and configuring the Bin
 1. **Clone the Repository**
 
    ```bash
-   git clone https://github.com/yourusername/binance-trading-bot.git
-   cd binance-trading-bot
+   git clone https://github.com/shreesha345/Binance-Trading-Bot.git
+   cd Binance-Trading-Bot
    ```
 
 2. **Create and Activate Virtual Environment**
@@ -76,8 +76,8 @@ This guide provides detailed instructions for setting up and configuring the Bin
 1. **Clone the Repository**
 
    ```bash
-   git clone https://github.com/yourusername/binance-trading-bot.git
-   cd binance-trading-bot
+   git clone https://github.com/shreesha345/Binance-Trading-Bot.git
+   cd Binance-Trading-Bot
    ```
 
 2. **Create Environment Configuration**
