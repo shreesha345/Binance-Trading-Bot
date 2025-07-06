@@ -25,20 +25,20 @@ This guide provides detailed instructions for setting up and configuring the Bin
 
    **Linux/macOS**:
    ```bash
-   python -m venv venv
+   uv venv
    source venv/bin/activate
    ```
 
    **Windows**:
    ```powershell
-   python -m venv venv
+   uv venv
    .\venv\Scripts\activate
    ```
 
 3. **Install Dependencies**
 
    ```bash
-   pip install -r requirements.txt
+   uv sync
    ```
 
 4. **Create Environment Configuration**
@@ -68,7 +68,7 @@ This guide provides detailed instructions for setting up and configuring the Bin
 5. **Initialize Order Storage**
 
    ```bash
-   python data/init_order_storage.py
+   uv run data/init_order_storage.py
    ```
 
 ### Option 2: Docker Installation
@@ -210,7 +210,7 @@ Parameters explained:
 
 ```bash
 # Standard installation
-python main.py
+uv run main.py
 
 # Or from Docker (if already built with docker-compose)
 docker-compose up -d trading-bot
@@ -220,7 +220,7 @@ docker-compose up -d trading-bot
 
 ```bash
 # Standard installation
-python telegram_bot/bot.py
+uv run telegram_bot/bot.py
 
 # Or from Docker (if already built with docker-compose)
 docker-compose up -d telegram-bot

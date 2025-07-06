@@ -192,9 +192,9 @@ The subscription system operates on a configurable payment cycle:
 
 2. Create a virtual environment and install dependencies:
    ```
-   python -m venv venv
+   uv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
+   uv sync
    ```
 
 3. Create a `.env` file in the project root with the following variables:
@@ -222,12 +222,12 @@ The subscription system operates on a configurable payment cycle:
 
 1. Start the main trading bot:
    ```
-   python main.py
+   uv run main.py
    ```
 
 2. Start the Telegram bot (if using):
    ```
-   python telegram_bot/bot.py
+   uv run telegram_bot/bot.py
    ```
 
 You can also use Docker to run the bot with the provided Dockerfile and docker-compose.yml.
