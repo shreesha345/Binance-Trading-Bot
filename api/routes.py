@@ -268,3 +268,121 @@ def analyze_pnl(req: PnLAnalysisRequest):
             status_code=500,
             content={"error": f"Failed to analyze PnL: {str(e)}"}
         )
+
+@router.get("/order_book/filter")
+def filter_order_book(
+    symbol: Optional[str] = None, 
+    interval: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Returns filtered filled orders from order_book.json based on:
+    - symbol: Trading pair symbol (e.g., 'ETHUSDT')
+    - interval: Candle interval (e.g., '1m', '5m', '15m', '1h')
+    - start_date: Filter orders after this date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+    - end_date: Filter orders before this date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+    """
+    from utils.order_storage import filter_filled_orders
+    
+    # Log the API request
+    filters = []
+    if symbol:
+        filters.append(f"symbol={symbol}")
+    if interval:
+        filters.append(f"interval={interval}")
+    if start_date:
+        filters.append(f"start_date={start_date}")
+    if end_date:
+        filters.append(f"end_date={end_date}")
+    
+    filter_str = ", ".join(filters) if filters else "no filters"
+    log_api(f"Filtered order book requested with {filter_str}")
+    
+    # Get filtered orders
+    filtered_orders = filter_filled_orders(
+        symbol=symbol,
+        time_interval=interval,
+        start_date=start_date,
+        end_date=end_date
+    )
+    
+    return {"filled_orders": filtered_orders, "count": len(filtered_orders)}
+
+@router.get("/order_book/export")
+def export_order_book(
+    filename: str,
+    symbol: Optional[str] = None, 
+    interval: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Exports filtered filled orders to a JSON file in the data directory.
+    
+    Parameters:
+    - filename: Name of the file to export to (will be saved in data directory)
+    - symbol: Trading pair symbol (e.g., 'ETHUSDT')
+    - interval: Candle interval (e.g., '1m', '5m', '15m', '1h')
+    - start_date: Filter orders after this date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+    - end_date: Filter orders before this date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+    """
+    from utils.order_storage import filter_filled_orders, DATA_DIR
+    import os
+    
+    # Validate filename to prevent directory traversal attacks
+    if os.path.sep in filename or '..' in filename:
+        return JSONResponse(
+            content={"error": "Invalid filename. Must not contain path separators or parent directory references"}, 
+            status_code=400
+        )
+    
+    # Ensure the filename has a .json extension
+    if not filename.lower().endswith('.json'):
+        filename += '.json'
+    
+    # Create the full output path in the data directory
+    output_path = os.path.join(DATA_DIR, filename)
+    
+    # Get filtered orders
+    filtered_orders = filter_filled_orders(
+        symbol=symbol,
+        time_interval=interval,
+        start_date=start_date,
+        end_date=end_date
+    )
+    
+    # Save to file
+    try:
+        with open(output_path, 'w') as f:
+            json.dump(filtered_orders, f, indent=2)
+    except Exception as e:
+        log_api(f"Error exporting orders to {output_path}: {str(e)}")
+        return JSONResponse(content={"error": f"Failed to export orders: {str(e)}"}, status_code=500)
+    
+    # Log the export
+    filters = []
+    if symbol:
+        filters.append(f"symbol={symbol}")
+    if interval:
+        filters.append(f"interval={interval}")
+    if start_date:
+        filters.append(f"start_date={start_date}")
+    if end_date:
+        filters.append(f"end_date={end_date}")
+    
+    filter_str = ", ".join(filters) if filters else "no filters"
+    log_api(f"Exported {len(filtered_orders)} orders with {filter_str} to {output_path}")
+    
+    return {
+        "success": True,
+        "filename": filename,
+        "path": output_path,
+        "count": len(filtered_orders),
+        "filters": {
+            "symbol": symbol,
+            "interval": interval,
+            "start_date": start_date,
+            "end_date": end_date
+        }
+    }
