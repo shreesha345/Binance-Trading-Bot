@@ -102,12 +102,16 @@ The stop-loss is updated with each new candle, allowing it to trail upward as th
 The bot's trading behavior can be configured in the `api/trading_config.json` file:
 
 - `symbol_name`: The trading pair (e.g., "ETHUSDT")
-- `quantity_type`: Trading quantity mode ("fixed" or "percentage")
+- `quantity_type`: Trading quantity mode ("fixed", "percentage", or "price")
 - `quantity`: Fixed quantity when using fixed mode (e.g., "1" for 1 ETH)
 - `quantity_percentage`: Percentage of available balance to use when in percentage mode (e.g., "5" for 5%)
+- `price_value`: Fixed USDT amount to use when in price mode (e.g., "10" for $10 worth of the asset)
+- `leverage`: Leverage to use for trading (e.g., "3" for 3x leverage)
 - `sell_long_offset`: Price offset for sell/stop orders (in quote currency units, e.g., "1" for $1 on ETHUSDT)
 - `buy_long_offset`: Price offset for buy orders (in quote currency units, e.g., "1" for $1 on ETHUSDT)
 - `candle_interval`: Candlestick interval (e.g., "1m", "5m", "15m", "1h", "4h", "1d")
+
+For more details on quantity calculation methods, see [QUANTITY_CALCULATION.md](QUANTITY_CALCULATION.md)
 
 ## Environment Configuration
 
