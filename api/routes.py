@@ -161,6 +161,8 @@ class TradingConfigUpdateRequest(BaseModel):
     quantity: Any = Field(default=None)
     quantity_type: Any = Field(default=None)
     quantity_percentage: Any = Field(default=None)
+    price_value: Any = Field(default=None)
+    leverage: Any = Field(default=None)
     candle_interval: Any = Field(default=None)
 
 @router.post("/trading_config/update")

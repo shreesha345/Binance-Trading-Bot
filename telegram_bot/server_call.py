@@ -130,6 +130,8 @@ def update_trading_config(
     quantity=None,
     quantity_type=None,
     quantity_percentage=None,
+    price_value=None,
+    leverage=None,
     candle_interval=None
 ):
     """
@@ -157,6 +159,10 @@ def update_trading_config(
         payload["quantity_type"] = quantity_type
     if quantity_percentage is not None:
         payload["quantity_percentage"] = quantity_percentage
+    if price_value is not None:
+        payload["price_value"] = price_value
+    if leverage is not None:
+        payload["leverage"] = leverage
     if candle_interval is not None:
         payload["candle_interval"] = candle_interval
 
@@ -219,3 +225,26 @@ def get_pnl_analysis(start_date=None, end_date=None, days=30):
         return response.json()
     else:
         raise Exception(f"Failed to get PnL analysis: {response.text}")
+
+def get_trading_config():
+    """
+    Get the current trading configuration
+    """
+    url = f"{base_url}/trading_config"
+    
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            error_message = f"Failed to get trading config: {response.text}"
+            print(f"ERROR: {error_message}")
+            raise Exception(error_message)
+    except requests.exceptions.ConnectionError as e:
+        error_message = f"Connection error while getting trading config: {str(e)}"
+        print(f"ERROR: {error_message}")
+        raise Exception(error_message)
+    except Exception as e:
+        error_message = f"Unexpected error while getting trading config: {str(e)}"
+        print(f"ERROR: {error_message}")
+        raise Exception(error_message)
