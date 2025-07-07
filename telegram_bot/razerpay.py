@@ -103,37 +103,30 @@ def save_payment_link_info(chat_id, payment_info):
     if not os.path.exists(PAYMENT_LINKS_FILE):
         with open(PAYMENT_LINKS_FILE, 'w') as f:
             json.dump({"payments": {}}, f, indent=2)
-    
     # Load existing data
     try:
         with open(PAYMENT_LINKS_FILE, 'r') as f:
             payment_data = json.load(f)
     except (json.JSONDecodeError, FileNotFoundError):
         payment_data = {"payments": {}}
-    
     # Update payment info
     chat_id_str = str(chat_id)
-    
     # Add timestamp to payment info
     payment_info["timestamp"] = datetime.now().isoformat()
     payment_info["chat_id"] = chat_id
-    
     # Save by payment ID for easy lookup
     payment_id = payment_info.get("breakdown", {}).get("payment_id")
     if payment_id:
         if "by_id" not in payment_data:
             payment_data["by_id"] = {}
         payment_data["by_id"][payment_id] = payment_info
-    
-    # Save by chat ID to track user's most recent payment
+    # Save by chat ID to track user's most recent payment (store only payment_id)
     if "by_chat_id" not in payment_data:
         payment_data["by_chat_id"] = {}
-    payment_data["by_chat_id"][chat_id_str] = payment_info
-    
+    payment_data["by_chat_id"][chat_id_str] = {"payment_id": payment_id}
     # Save the updated data
     with open(PAYMENT_LINKS_FILE, 'w') as f:
         json.dump(payment_data, f, indent=2)
-    
     return True
 
 def get_payment_info_by_chat_id(chat_id):
@@ -148,7 +141,10 @@ def get_payment_info_by_chat_id(chat_id):
             payment_data = json.load(f)
         
         chat_id_str = str(chat_id)
-        return payment_data.get("by_chat_id", {}).get(chat_id_str)
+        payment_id = payment_data.get("by_chat_id", {}).get(chat_id_str, {}).get("payment_id")
+        if payment_id:
+            return payment_data.get("by_id", {}).get(payment_id)
+        return None
     except (json.JSONDecodeError, FileNotFoundError):
         return None
 

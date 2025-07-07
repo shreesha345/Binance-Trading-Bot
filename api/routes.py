@@ -14,6 +14,7 @@ import tempfile
 from utils.pnl_analyzer import BinanceFuturesPnLTracker
 from utils.config import BINANCE_API_KEY, BINANCE_API_SECRET, TEST
 from datetime import datetime
+from fastapi import Query
 
 router = APIRouter()
 
@@ -388,3 +389,107 @@ def export_order_book(
             "end_date": end_date
         }
     }
+
+@router.get("/payment_links")
+def get_all_payment_links():
+    """
+    Get all payment links data (by_id and by_chat_id).
+    """
+    payment_links_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'telegram_bot', 'payment_links.json')
+    if not os.path.exists(payment_links_path):
+        return JSONResponse(content={"error": "payment_links.json not found"}, status_code=404)
+    with open(payment_links_path, 'r', encoding='utf-8') as f:
+        try:
+            data = json.load(f)
+        except Exception:
+            return JSONResponse(content={"error": "Invalid JSON in payment_links.json"}, status_code=500)
+    return data
+
+@router.get("/payment_links/by_id/{payment_id}")
+def get_payment_link_by_id(payment_id: str):
+    """
+    Get payment link info by payment_id.
+    """
+    payment_links_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'telegram_bot', 'payment_links.json')
+    if not os.path.exists(payment_links_path):
+        return JSONResponse(content={"error": "payment_links.json not found"}, status_code=404)
+    with open(payment_links_path, 'r', encoding='utf-8') as f:
+        try:
+            data = json.load(f)
+        except Exception:
+            return JSONResponse(content={"error": "Invalid JSON in payment_links.json"}, status_code=500)
+    result = data.get("by_id", {}).get(payment_id)
+    if not result:
+        return JSONResponse(content={"error": "payment_id not found"}, status_code=404)
+    return result
+
+@router.get("/payment_links/by_chat_id/{chat_id}")
+def get_payment_link_by_chat_id(chat_id: str):
+    """
+    Get payment link info by chat_id.
+    """
+    payment_links_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'telegram_bot', 'payment_links.json')
+    if not os.path.exists(payment_links_path):
+        return JSONResponse(content={"error": "payment_links.json not found"}, status_code=404)
+    with open(payment_links_path, 'r', encoding='utf-8') as f:
+        try:
+            data = json.load(f)
+        except Exception:
+            return JSONResponse(content={"error": "Invalid JSON in payment_links.json"}, status_code=500)
+    payment_id = data.get("by_chat_id", {}).get(str(chat_id), {}).get("payment_id")
+    if not payment_id:
+        return JSONResponse(content={"error": "chat_id not found or no payment_id for chat_id"}, status_code=404)
+    result = data.get("by_id", {}).get(payment_id)
+    if not result:
+        return JSONResponse(content={"error": "payment_id not found for chat_id"}, status_code=404)
+    return result
+
+@router.get("/payment_links/breakdown")
+def get_payment_breakdowns(
+    start_date: str = Query(None, description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query(None, description="End date in YYYY-MM-DD format")
+):
+    """
+    Get payment breakdowns and total amounts for all payments in a date range (by timestamp).
+    Does not show payment_id or chat_id, only breakdown and total amount.
+    """
+    from datetime import datetime
+    payment_links_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'telegram_bot', 'payment_links.json')
+    if not os.path.exists(payment_links_path):
+        return JSONResponse(content={"error": "payment_links.json not found"}, status_code=404)
+    with open(payment_links_path, 'r', encoding='utf-8') as f:
+        try:
+            data = json.load(f)
+        except Exception:
+            return JSONResponse(content={"error": "Invalid JSON in payment_links.json"}, status_code=500)
+    results = []
+    for payment in data.get("by_id", {}).values():
+        ts = payment.get("timestamp")
+        if not ts:
+            continue
+        try:
+            dt = datetime.fromisoformat(ts)
+        except Exception:
+            continue
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date)
+            except Exception:
+                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            if dt < start_dt:
+                continue
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date)
+            except Exception:
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            if dt > end_dt:
+                continue
+        breakdown = payment.get("breakdown", {})
+        # Remove payment_id from breakdown if present
+        breakdown = {k: v for k, v in breakdown.items() if k != "payment_id"}
+        results.append({
+            "breakdown": breakdown,
+            "total_amount": payment.get("amount")
+        })
+    return {"payments": results}
