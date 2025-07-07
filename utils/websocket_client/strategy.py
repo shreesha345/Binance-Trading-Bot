@@ -15,7 +15,7 @@ from utils.bot_state import (
     get_candle_order_created_at, set_candle_order_created_at
 )
 from utils.config import (
-    FIXED_QUANTITY, QUANTITY_TYPE, QUANTITY_PERCENTAGE, PRICE_VALUE, LEVERAGE, BUY_OFFSET, SELL_OFFSET
+    get_fixed_quantity, get_quantity_type, get_quantity_percentage, get_price_value, get_leverage, get_buy_offset, get_sell_offset
 )
 from utils.quantity_calculator import calculate_quantity
 from rich import print as rich_print
@@ -127,7 +127,7 @@ def handle_filled_buy_order(row_data, symbol, order_details, filled_price):
     
     # Calculate stop loss price using floor to match exchange behavior
     # First calculate the raw price
-    raw_stop_price = row_data["ha_low"] - SELL_OFFSET
+    raw_stop_price = row_data["ha_low"] - get_sell_offset()
     
     # Apply floor with tick size for exact matching with exchange
     tick_size = get_tick_size(symbol)
@@ -138,9 +138,9 @@ def handle_filled_buy_order(row_data, symbol, order_details, filled_price):
     row_data["stop_loss"] = stop_trigger_price
     
     # Get the actual filled quantity from the order details
-    filled_quantity = float(order_details.get('executedQty', calculate_quantity(FIXED_QUANTITY, QUANTITY_PERCENTAGE, QUANTITY_TYPE, PRICE_VALUE, LEVERAGE)))
+    filled_quantity = float(order_details.get('executedQty', calculate_quantity(get_fixed_quantity(), get_quantity_percentage(), get_quantity_type(), get_price_value(), get_leverage())))
     if filled_quantity <= 0:
-        filled_quantity = calculate_quantity(FIXED_QUANTITY, QUANTITY_PERCENTAGE, QUANTITY_TYPE, PRICE_VALUE, LEVERAGE)  # Fallback to configured quantity
+        filled_quantity = calculate_quantity(get_fixed_quantity(), get_quantity_percentage(), get_quantity_type(), get_price_value(), get_leverage())  # Fallback to configured quantity
     
     log_message(f"[STRATEGY] Creating initial stop loss after buy fill with trigger at: {stop_trigger_price}")
     sell_order = sell_long(symbol, price=stop_trigger_price, stop_limit=stop_trigger_price, quantity=filled_quantity)
@@ -191,7 +191,7 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
     # Calculate buy parameters
     # Price = HA_High + BUY_OFFSET
     # Stop limit = Current HA_High (not previous candle)
-    buy_price_display = round(row_data["ha_high"] + BUY_OFFSET, 2)
+    buy_price_display = round(row_data["ha_high"] + get_buy_offset(), 2)
     buy_price = buy_price_display  # Keep the original value for display
     
     # Use current candle HA high for stop limit
@@ -199,7 +199,7 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
     
     # Calculate sell parameters with math.floor for exact tick size matching
     tick_size = get_tick_size(symbol)
-    raw_stop_price = row_data["ha_low"] - SELL_OFFSET
+    raw_stop_price = row_data["ha_low"] - get_sell_offset()
     sell_stop_limit_display = math.floor(raw_stop_price / tick_size) * tick_size
     sell_stop_limit_display = round(sell_stop_limit_display, 2)  # Format to clean 2 decimal places
     sell_stop_limit = sell_stop_limit_display  # Keep the original value for order placement
@@ -277,8 +277,8 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
             
             # Only place stop order if current price is below stop_limit
             if current_price < buy_stop_limit:
-                log_message(f"[STRATEGY] Creating buy order for next candle: {symbol} at price: {buy_price} (HA_High + {BUY_OFFSET}), stop_limit: {buy_stop_limit} (HA_High)")
-                buy_order = buy_long(symbol, price=buy_price, stop_limit=buy_stop_limit, quantity=calculate_quantity(FIXED_QUANTITY, QUANTITY_PERCENTAGE, QUANTITY_TYPE, PRICE_VALUE, LEVERAGE))
+                log_message(f"[STRATEGY] Creating buy order for next candle: {symbol} at price: {buy_price} (HA_High + {get_buy_offset()}), stop_limit: {buy_stop_limit} (HA_High)")
+                buy_order = buy_long(symbol, price=buy_price, stop_limit=buy_stop_limit, quantity=calculate_quantity(get_fixed_quantity(), get_quantity_percentage(), get_quantity_type(), get_price_value(), get_leverage()))
                 if buy_order:
                     set_active_buy_order(buy_order)
                     set_candle_order_created_at(row_data["timestamp"])
@@ -290,7 +290,7 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
             log_error(f"Error checking market price before placing order: {e}", exc_info=True)
             # Fallback - try placing the order anyway
             log_message(f"[STRATEGY] Creating buy order for next candle (fallback): {symbol} at price: {buy_price}, stop_limit: {buy_stop_limit}")
-            buy_order = buy_long(symbol, price=buy_price, stop_limit=buy_stop_limit, quantity=calculate_quantity(FIXED_QUANTITY, QUANTITY_PERCENTAGE, QUANTITY_TYPE, PRICE_VALUE, LEVERAGE))
+            buy_order = buy_long(symbol, price=buy_price, stop_limit=buy_stop_limit, quantity=calculate_quantity(get_fixed_quantity(), get_quantity_percentage(), get_quantity_type(), get_price_value(), get_leverage()))
             if buy_order:
                 set_active_buy_order(buy_order)
                 set_candle_order_created_at(row_data["timestamp"])
@@ -402,7 +402,7 @@ def format_row_with_strategy(kline, symbol, previous_ha_candle, allow_trading=Tr
             # Only create a new stop loss if the position actually exists
             if position_found:
                 # Calculate the new stop loss price based on current candle with tick size adjustment
-                raw_stop_price = row_data["ha_low"] - SELL_OFFSET
+                raw_stop_price = row_data["ha_low"] - get_sell_offset()
                 tick_size = get_tick_size(symbol)
                 sell_stop_limit = math.floor(raw_stop_price / tick_size) * tick_size
                 sell_stop_limit = round(sell_stop_limit, 2)  # Format to clean 2 decimal places
