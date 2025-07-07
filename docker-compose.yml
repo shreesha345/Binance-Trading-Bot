@@ -7,9 +7,14 @@ services:
       - .:/app
       # Exclude the virtual environment from the mount
       - /app/.venv
+      # Mount timezone files for IST
+      - /usr/share/zoneinfo/Asia/Kolkata:/etc/localtime:ro
+      - /usr/share/zoneinfo/Asia/Kolkata:/usr/share/zoneinfo/Asia/Kolkata:ro
     working_dir: /app
     ports:
       - "8000:8000"
+    environment:
+      - TZ=Asia/Kolkata
     networks:
       - botnet
 
@@ -21,9 +26,13 @@ services:
       - .:/app
       # Exclude the virtual environment from the mount
       - /app/.venv
+      # Mount timezone files for IST
+      - /usr/share/zoneinfo/Asia/Kolkata:/etc/localtime:ro
+      - /usr/share/zoneinfo/Asia/Kolkata:/usr/share/zoneinfo/Asia/Kolkata:ro
     working_dir: /app
     environment:
       - API_BASE_URL=http://backend:8000
+      - TZ=Asia/Kolkata
     depends_on:
       - backend
     networks:
