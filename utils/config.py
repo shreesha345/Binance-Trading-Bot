@@ -58,20 +58,36 @@ BINANCE_API_KEY, BINANCE_API_SECRET, GEMINI_API_KEY = get_binance_keys()
 # Path to trading_config.json in the api folder
 TRADING_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api', 'trading_config.json')
 
-# Load trading config
-with open(TRADING_CONFIG_PATH, 'r') as f:
-    trading_config = json.load(f)
+def load_trading_config():
+    with open(TRADING_CONFIG_PATH, 'r') as f:
+        return json.load(f)
 
-# Config values from trading_config.json
-QUANTITY_TYPE = trading_config.get('quantity_type', 'fixed')
-FIXED_QUANTITY = float(trading_config.get('quantity', os.getenv('QUANTITY', '0.01')))
-QUANTITY_PERCENTAGE = float(trading_config.get('quantity_percentage', '10'))
-PRICE_VALUE = float(trading_config.get('price_value', '10'))  # Default to 10 USDT
-LEVERAGE = int(trading_config.get('leverage', '1'))  # Default to 1x leverage
-TRADING_SYMBOL = trading_config.get('symbol_name')
-SELL_OFFSET = float(trading_config.get('sell_long_offset', 0))
-BUY_OFFSET = float(trading_config.get('buy_long_offset', 0))
-CANDLE_INTERVAL = trading_config.get('candle_interval')
+def get_quantity_type():
+    return load_trading_config().get('quantity_type', 'fixed')
+
+def get_fixed_quantity():
+    return float(load_trading_config().get('quantity', os.getenv('QUANTITY', '0.01')))
+
+def get_quantity_percentage():
+    return float(load_trading_config().get('quantity_percentage', '10'))
+
+def get_price_value():
+    return float(load_trading_config().get('price_value', '10'))
+
+def get_leverage():
+    return int(load_trading_config().get('leverage', '1'))
+
+def get_trading_symbol():
+    return load_trading_config().get('symbol_name')
+
+def get_sell_offset():
+    return float(load_trading_config().get('sell_long_offset', 0))
+
+def get_buy_offset():
+    return float(load_trading_config().get('buy_long_offset', 0))
+
+def get_candle_interval():
+    return load_trading_config().get('candle_interval')
 
 # Order settings
 MAX_ORDERS = 1  # Maximum number of open orders per symbol

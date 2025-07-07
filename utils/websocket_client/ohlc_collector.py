@@ -11,7 +11,7 @@ from utils.websocket_client.clear_screen import clear_screen
 from utils.websocket_client.display import print_ohlcv_table_with_signals
 from utils.websocket_client.heikin_ashi import calculate_heikin_ashi
 from utils.websocket_client.strategy import format_row_with_strategy, add_strategy_to_historical_data
-from utils.config import FIXED_QUANTITY, QUANTITY_TYPE, QUANTITY_PERCENTAGE, DEBUG_MODE, SHOW_ERRORS
+from utils.config import get_fixed_quantity, get_quantity_type, get_quantity_percentage, DEBUG_MODE, SHOW_ERRORS
 from utils.quantity_calculator import calculate_quantity
 from utils.bot_state import reset_state
 from utils.logger import log_websocket, log_error

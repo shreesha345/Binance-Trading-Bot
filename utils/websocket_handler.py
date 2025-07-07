@@ -7,7 +7,7 @@ import websockets
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # custom imports
-from utils.config import MODE, DEBUG_MODE, SHOW_ERRORS, TRADING_SYMBOL, CANDLE_INTERVAL
+from utils.config import MODE, DEBUG_MODE, SHOW_ERRORS, get_trading_symbol, get_candle_interval
 from utils.websocket_client.ohlc_collector import ohlc_strategy_collector
 from utils.logger import log_websocket, log_error
 
@@ -16,8 +16,8 @@ def websocket_runner():
     debug_arg = "--debug" in sys.argv or "-d" in sys.argv
     debug_mode = DEBUG_MODE or debug_arg
     
-    symbol = TRADING_SYMBOL
-    interval = CANDLE_INTERVAL
+    symbol = get_trading_symbol()
+    interval = get_candle_interval()
     testnet = MODE
     
     # Retry settings

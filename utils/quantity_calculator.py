@@ -1,6 +1,6 @@
 from binance.client import Client
 import math
-from utils.config import BINANCE_API_KEY, BINANCE_API_SECRET, MODE, TRADING_SYMBOL
+from utils.config import BINANCE_API_KEY, BINANCE_API_SECRET, MODE, get_trading_symbol, get_leverage
 from utils.logger import log_websocket, log_error
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET, testnet=MODE)
@@ -102,21 +102,21 @@ def calculate_quantity(fixed_quantity, percentage, quantity_type='fixed', price_
     """
     try:
         # Get current price of the trading symbol
-        ticker = client.futures_symbol_ticker(symbol=TRADING_SYMBOL)
+        ticker = client.futures_symbol_ticker(symbol=get_trading_symbol())
         current_price = float(ticker['price'])
         
         # Get precision and step size for the symbol
-        precision, step_size = get_asset_precision(TRADING_SYMBOL)
+        precision, step_size = get_asset_precision(get_trading_symbol())
         
         # Get minimum notional value
-        min_notional = get_min_notional(TRADING_SYMBOL)
+        min_notional = get_min_notional(get_trading_symbol())
         
         # If leverage is provided, try to set it
         if leverage is not None:
-            set_leverage(TRADING_SYMBOL, leverage)
+            set_leverage(get_trading_symbol(), leverage)
         
         # Get the current leverage (will use the one just set if applicable)
-        current_leverage = get_leverage(TRADING_SYMBOL)
+        current_leverage = get_leverage(get_trading_symbol())
         
         # Calculate quantity based on the selected type
         if quantity_type.lower() == 'percentage':
@@ -164,11 +164,11 @@ def calculate_quantity(fixed_quantity, percentage, quantity_type='fixed', price_
         
         # Log the calculation details
         if quantity_type.lower() == 'percentage':
-            log_websocket(f"Calculated quantity based on {percentage}% of balance with {current_leverage}x leverage: {quantity} {TRADING_SYMBOL.replace('USDT', '')}")
+            log_websocket(f"Calculated quantity based on {percentage}% of balance with {current_leverage}x leverage: {quantity} {get_trading_symbol().replace('USDT', '')}")
         elif quantity_type.lower() == 'price':
-            log_websocket(f"Calculated quantity based on {price_value} USDT with {current_leverage}x leverage: {quantity} {TRADING_SYMBOL.replace('USDT', '')}")
+            log_websocket(f"Calculated quantity based on {price_value} USDT with {current_leverage}x leverage: {quantity} {get_trading_symbol().replace('USDT', '')}")
         else:
-            log_websocket(f"Using fixed quantity: {quantity} {TRADING_SYMBOL.replace('USDT', '')}")
+            log_websocket(f"Using fixed quantity: {quantity} {get_trading_symbol().replace('USDT', '')}")
         
         # Final check for minimum notional
         final_notional = quantity * current_price
