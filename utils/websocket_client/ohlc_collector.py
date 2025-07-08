@@ -21,7 +21,7 @@ try:
 except ImportError:
     Client = None
 
-async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = False, debug_mode: bool = False):
+async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = False, debug_mode: bool = False, stop_event=None):
     # Sync system time with Binance server time if possible
     if Client is not None:
         try:
@@ -75,6 +75,10 @@ async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = Fa
         async def on_kline(kline):
             nonlocal previous_ha_candle, last_candle_time, latest_historical_timestamp
             
+            if stop_event is not None and stop_event.is_set():
+                log_websocket("\n🛑 Stop event detected in on_kline. Exiting async loop.")
+                raise asyncio.CancelledError()
+            
             # Skip if candle is not closed yet
             if not kline.get('x'):
                 return
@@ -116,7 +120,10 @@ async def ohlc_strategy_collector(symbol: str, interval: str, testnet: bool = Fa
             log_websocket(table_output)
             
         # Start websocket listener with retry mechanism
-        await ohlc_listener_futures_ws(symbol, interval, on_kline, testnet=testnet)
+        if stop_event is not None and stop_event.is_set():
+            log_websocket("\n🛑 Stop event detected before websocket listener. Exiting async function.")
+            return
+        await ohlc_listener_futures_ws(symbol, interval, on_kline, testnet=testnet, stop_event=stop_event)
         
     except KeyboardInterrupt:
         log_websocket("\n🔄 Shutting down gracefully...")
