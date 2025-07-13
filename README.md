@@ -1,6 +1,35 @@
 # Binance Trading Bot
 
+## 🎯 Problem Statement
+
+Cryptocurrency trading presents several significant challenges for both novice and experienced traders:
+
+- **24/7 Market Monitoring**: Cryptocurrency markets operate continuously, requiring constant attention that's impossible for human traders
+- **Emotional Trading Decisions**: Human traders often make poor decisions due to fear, greed, or other emotional factors
+- **Complex Technical Analysis**: Manual analysis of market data, candlestick patterns, and technical indicators is time-consuming and error-prone
+- **Risk Management**: Consistent application of stop-losses and position sizing is difficult to maintain manually
+- **Market Volatility**: Rapid price movements can lead to missed opportunities or significant losses without automated responses
+- **Accessibility**: Advanced trading strategies and real-time market access are often limited to professional traders with expensive tools
+
+This Binance Trading Bot addresses these challenges by providing:
+- **Automated 24/7 Trading**: Continuous market monitoring and execution without human intervention
+- **Emotion-Free Trading**: Algorithm-based decisions eliminate emotional bias
+- **Advanced Strategy Implementation**: Sophisticated Heikin Ashi-based trading strategy with automated signal generation
+- **Built-in Risk Management**: Automated stop-loss placement and position sizing
+- **Real-time Market Response**: Instant reaction to market conditions through WebSocket connections
+- **Accessible Platform**: User-friendly Telegram interface with subscription-based access
+
 This bot is an automated trading system for Binance Futures, written in Python. It connects to Binance via API and can operate in both testnet and live modes. The bot implements a strategy using Heikin Ashi candles and listens to live kline (OHLC) data via Binance WebSocket.
+
+## 📚 Documentation Index
+
+This project includes comprehensive documentation to help you understand and use the trading bot effectively:
+
+- **[📋 Installation Guide](INSTALLATION.md)** - Complete setup instructions, prerequisites, and environment configuration
+- **[🏗️ Architecture Overview](ARCHITECTURE.md)** - System design, components, and technical architecture details
+- **[📈 Trading Strategy](STRATEGY.md)** - Detailed explanation of the Heikin Ashi-based trading strategy
+- **[💰 Payment System](TELEGRAM_PAYMENT.md)** - Telegram bot payment integration and subscription management
+- **[🧮 Quantity Calculation](QUANTITY_CALCULATION.md)** - How trading quantities are calculated for different modes
 
 ## Key Features
 
