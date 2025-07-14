@@ -1,5 +1,5 @@
 # Binance Trading Bot
-
+[ Trading System ] [ AI Powered ]
 ## 🎯 Problem Statement
 
 Cryptocurrency trading presents several significant challenges for both novice and experienced traders:
