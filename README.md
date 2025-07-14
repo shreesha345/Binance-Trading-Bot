@@ -1,5 +1,5 @@
 # Binance Trading Bot
-[ Trading System ][ AI Powered ]
+![Static Badge](https://img.shields.io/badge/Trading%20System-AI%20Powered-grey?labelColor=black)
 ## 🎯 Problem Statement
 
 Cryptocurrency trading presents several significant challenges for both novice and experienced traders:
